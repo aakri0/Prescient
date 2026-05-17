@@ -5,15 +5,17 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <iterator>
 #include <string>
 
 using namespace llvm;
 
 namespace {
 
-// Per-function results. More fields are added in issues #8-#12.
+// Per-function results. More fields are added in issues #9-#12.
 struct FunctionFeatures {
   std::string function_name;
 
@@ -22,6 +24,11 @@ struct FunctionFeatures {
   unsigned basic_block_count = 0;
   unsigned argument_count = 0;
   unsigned call_site_count = 0;
+
+  // #8 — cyclomatic complexity
+  unsigned cfg_edge_count = 0;
+  unsigned cyclomatic_complexity = 0;
+  unsigned max_bb_successors = 0;
 };
 
 FunctionFeatures analyzeFunction(Function &F) {
@@ -37,6 +44,20 @@ FunctionFeatures analyzeFunction(Function &F) {
       if (isa<CallInst>(I) || isa<InvokeInst>(I))
         FF.call_site_count++;
   }
+
+  // #8 — cyclomatic complexity: M = E - N + 2
+  for (BasicBlock &BB : F) {
+    unsigned succ = std::distance(succ_begin(&BB), succ_end(&BB));
+    FF.cfg_edge_count += succ;
+    if (succ > FF.max_bb_successors)
+      FF.max_bb_successors = succ;
+  }
+  // Guard against unsigned underflow for tiny CFGs.
+  if (FF.cfg_edge_count + 2 > FF.basic_block_count)
+    FF.cyclomatic_complexity = FF.cfg_edge_count - FF.basic_block_count + 2;
+  else
+    FF.cyclomatic_complexity = 1;
+
   return FF;
 }
 
@@ -51,7 +72,8 @@ struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
            << ": insts=" << FF.instruction_count
            << " bbs=" << FF.basic_block_count
            << " args=" << FF.argument_count
-           << " calls=" << FF.call_site_count << "\n";
+           << " calls=" << FF.call_site_count
+           << " cyclomatic=" << FF.cyclomatic_complexity << "\n";
 
     return PreservedAnalyses::all();
   }
