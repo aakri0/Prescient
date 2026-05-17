@@ -1,0 +1,15 @@
+# Build artifacts
+build/
+output/
+*.so
+*.o
+
+# Python
+__pycache__/
+*.pyc
+
+# Trained models
+models/*.joblib
+
+# Environment
+.env
