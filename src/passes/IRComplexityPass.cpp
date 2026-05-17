@@ -5,6 +5,7 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/raw_ostream.h"
@@ -16,7 +17,7 @@ using namespace llvm;
 
 namespace {
 
-// Per-function results. More fields are added in issue #12.
+// Per-function results — the field set defines the JSON schema (issue #13).
 struct FunctionFeatures {
   std::string function_name;
 
@@ -48,6 +49,15 @@ struct FunctionFeatures {
   float type_complexity_normalized = 0.0f;
   unsigned max_pointer_depth = 0;
   unsigned struct_field_total = 0;
+
+  // #12 — alias proxy density
+  unsigned load_count = 0;
+  unsigned store_count = 0;
+  unsigned gep_count = 0;
+  unsigned memory_intrinsic_count = 0;
+  unsigned total_memory_ops = 0;
+  float alias_proxy_density = 0.0f;
+  float memory_write_ratio = 0.0f;
 };
 
 // Recursively score a type by structural depth. LLVM 17 uses opaque pointers
@@ -126,7 +136,7 @@ FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
     FF.loop_instruction_ratio =
         (float)FF.loop_body_instruction_count / FF.instruction_count;
 
-  // #10 — PHI node density / #11 — type complexity
+  // #10 PHI density / #11 type complexity / #12 memory ops — single scan
   unsigned ptrDepth = 0, structFields = 0;
   for (BasicBlock &BB : F) {
     unsigned bbPhi = 0;
@@ -141,6 +151,18 @@ FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
       for (Use &U : I.operands())
         FF.type_complexity_score +=
             scoreType(U->getType(), ptrDepth, structFields);
+      if (isa<LoadInst>(I))
+        FF.load_count++;
+      else if (isa<StoreInst>(I))
+        FF.store_count++;
+      else if (isa<GetElementPtrInst>(I))
+        FF.gep_count++;
+      if (auto *II = dyn_cast<IntrinsicInst>(&I)) {
+        if (II->getIntrinsicID() == Intrinsic::memcpy ||
+            II->getIntrinsicID() == Intrinsic::memmove ||
+            II->getIntrinsicID() == Intrinsic::memset)
+          FF.memory_intrinsic_count++;
+      }
     }
     if (bbPhi > FF.max_phi_in_single_bb)
       FF.max_phi_in_single_bb = bbPhi;
@@ -152,6 +174,16 @@ FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
     FF.type_complexity_normalized =
         (float)FF.type_complexity_score / FF.instruction_count;
   }
+
+  // #12 — alias proxy density
+  FF.total_memory_ops = FF.load_count + FF.store_count + FF.gep_count +
+                        FF.memory_intrinsic_count;
+  if (FF.instruction_count > 0)
+    FF.alias_proxy_density =
+        (float)FF.total_memory_ops / FF.instruction_count;
+  unsigned ls = FF.load_count + FF.store_count;
+  if (ls > 0)
+    FF.memory_write_ratio = (float)FF.store_count / ls;
 
   return FF;
 }
@@ -166,8 +198,8 @@ struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
     errs() << "[IRComplexity] " << FF.function_name
            << ": insts=" << FF.instruction_count
            << " cyclomatic=" << FF.cyclomatic_complexity
-           << " phis=" << FF.phi_node_count
-           << " type_score=" << FF.type_complexity_score << "\n";
+           << " mem_ops=" << FF.total_memory_ops
+           << " alias_density=" << FF.alias_proxy_density << "\n";
 
     return PreservedAnalyses::all();
   }
