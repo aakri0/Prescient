@@ -16,7 +16,7 @@ using namespace llvm;
 
 namespace {
 
-// Per-function results. More fields are added in issues #11-#12.
+// Per-function results. More fields are added in issue #12.
 struct FunctionFeatures {
   std::string function_name;
 
@@ -42,7 +42,46 @@ struct FunctionFeatures {
   float phi_density = 0.0f;
   unsigned max_phi_in_single_bb = 0;
   unsigned phi_node_incoming_edges = 0;
+
+  // #11 — type complexity
+  unsigned type_complexity_score = 0;
+  float type_complexity_normalized = 0.0f;
+  unsigned max_pointer_depth = 0;
+  unsigned struct_field_total = 0;
 };
+
+// Recursively score a type by structural depth. LLVM 17 uses opaque pointers
+// by default, so a pointer's pointee is usually unknowable from the type
+// alone — opaque pointers contribute depth 1 and cannot be descended into.
+unsigned scoreType(Type *T, unsigned &maxPtrDepth, unsigned &structFields,
+                   unsigned ptrDepth = 0, unsigned depth = 0) {
+  if (depth > 10)
+    return 10; // cycle guard for self-referential types
+
+  if (T->isPointerTy()) {
+    unsigned d = ptrDepth + 1;
+    if (d > maxPtrDepth)
+      maxPtrDepth = d;
+    if (T->isOpaquePointerTy())
+      return 1; // opaque pointer — pointee type is not recoverable
+    return 1 + scoreType(T->getNonOpaquePointerElementType(), maxPtrDepth,
+                         structFields, d, depth + 1);
+  }
+  if (auto *ST = dyn_cast<StructType>(T)) {
+    unsigned s = ST->getNumElements();
+    structFields += ST->getNumElements();
+    for (Type *elem : ST->elements())
+      s += scoreType(elem, maxPtrDepth, structFields, ptrDepth, depth + 1);
+    return s;
+  }
+  if (auto *AT = dyn_cast<ArrayType>(T))
+    return 1 + scoreType(AT->getElementType(), maxPtrDepth, structFields,
+                         ptrDepth, depth + 1);
+  if (auto *VT = dyn_cast<VectorType>(T))
+    return 1 + scoreType(VT->getElementType(), maxPtrDepth, structFields,
+                         ptrDepth, depth + 1);
+  return 1; // primitive type
+}
 
 FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
   FunctionFeatures FF;
@@ -87,7 +126,8 @@ FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
     FF.loop_instruction_ratio =
         (float)FF.loop_body_instruction_count / FF.instruction_count;
 
-  // #10 — PHI node density
+  // #10 — PHI node density / #11 — type complexity
+  unsigned ptrDepth = 0, structFields = 0;
   for (BasicBlock &BB : F) {
     unsigned bbPhi = 0;
     for (Instruction &I : BB) {
@@ -96,12 +136,22 @@ FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
         bbPhi++;
         FF.phi_node_incoming_edges += PN->getNumIncomingValues();
       }
+      FF.type_complexity_score +=
+          scoreType(I.getType(), ptrDepth, structFields);
+      for (Use &U : I.operands())
+        FF.type_complexity_score +=
+            scoreType(U->getType(), ptrDepth, structFields);
     }
     if (bbPhi > FF.max_phi_in_single_bb)
       FF.max_phi_in_single_bb = bbPhi;
   }
-  if (FF.instruction_count > 0)
+  FF.max_pointer_depth = ptrDepth;
+  FF.struct_field_total = structFields;
+  if (FF.instruction_count > 0) {
     FF.phi_density = (float)FF.phi_node_count / FF.instruction_count;
+    FF.type_complexity_normalized =
+        (float)FF.type_complexity_score / FF.instruction_count;
+  }
 
   return FF;
 }
@@ -116,8 +166,8 @@ struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
     errs() << "[IRComplexity] " << FF.function_name
            << ": insts=" << FF.instruction_count
            << " cyclomatic=" << FF.cyclomatic_complexity
-           << " loops=" << FF.loop_count
-           << " phis=" << FF.phi_node_count << "\n";
+           << " phis=" << FF.phi_node_count
+           << " type_score=" << FF.type_complexity_score << "\n";
 
     return PreservedAnalyses::all();
   }
