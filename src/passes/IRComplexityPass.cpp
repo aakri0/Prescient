@@ -6,6 +6,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <iterator>
@@ -15,7 +16,7 @@ using namespace llvm;
 
 namespace {
 
-// Per-function results. More fields are added in issues #9-#12.
+// Per-function results. More fields are added in issues #10-#12.
 struct FunctionFeatures {
   std::string function_name;
 
@@ -29,9 +30,15 @@ struct FunctionFeatures {
   unsigned cfg_edge_count = 0;
   unsigned cyclomatic_complexity = 0;
   unsigned max_bb_successors = 0;
+
+  // #9 — loop metrics
+  unsigned loop_count = 0;
+  unsigned max_loop_depth = 0;
+  unsigned loop_body_instruction_count = 0;
+  float loop_instruction_ratio = 0.0f;
 };
 
-FunctionFeatures analyzeFunction(Function &F) {
+FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
   FunctionFeatures FF;
   FF.function_name = F.getName().str();
 
@@ -58,6 +65,22 @@ FunctionFeatures analyzeFunction(Function &F) {
   else
     FF.cyclomatic_complexity = 1;
 
+  // #9 — loop metrics
+  LoopInfo &LI = FAM.getResult<LoopAnalysis>(F);
+  auto Loops = LI.getLoopsInPreorder();
+  FF.loop_count = Loops.size();
+  for (Loop *L : Loops)
+    if (L->getLoopDepth() > FF.max_loop_depth)
+      FF.max_loop_depth = L->getLoopDepth();
+  // Iterate top-level loops only: their block lists already cover nested
+  // loops, so this avoids counting nested-loop instructions twice.
+  for (Loop *L : LI)
+    for (BasicBlock *BB : L->getBlocks())
+      FF.loop_body_instruction_count += BB->size();
+  if (FF.instruction_count > 0)
+    FF.loop_instruction_ratio =
+        (float)FF.loop_body_instruction_count / FF.instruction_count;
+
   return FF;
 }
 
@@ -67,13 +90,13 @@ struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
       return PreservedAnalyses::all();
     errs() << "[IRComplexity] Analyzing function: " << F.getName() << "\n";
 
-    FunctionFeatures FF = analyzeFunction(F);
+    FunctionFeatures FF = analyzeFunction(F, FAM);
     errs() << "[IRComplexity] " << FF.function_name
            << ": insts=" << FF.instruction_count
            << " bbs=" << FF.basic_block_count
-           << " args=" << FF.argument_count
-           << " calls=" << FF.call_site_count
-           << " cyclomatic=" << FF.cyclomatic_complexity << "\n";
+           << " cyclomatic=" << FF.cyclomatic_complexity
+           << " loops=" << FF.loop_count
+           << " max_depth=" << FF.max_loop_depth << "\n";
 
     return PreservedAnalyses::all();
   }
