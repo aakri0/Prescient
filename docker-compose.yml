@@ -1,0 +1,16 @@
+# Convenience wrapper around the Docker image.
+#   docker compose build              # build the image
+#   docker compose run --rm prescient extract testcases/training/x.c
+#   docker compose run --rm prescient --help
+#
+# Manual (non-Docker) usage is unchanged: scripts/setup_env.sh, ./build.sh,
+# ./run.sh on an Ubuntu 22.04 host.
+services:
+  prescient:
+    build: .
+    image: prescient:latest
+    volumes:
+      # Surface generated artifacts on the host and let the container see
+      # locally added test cases without rebuilding the image.
+      - ./output:/opt/prescient/output
+      - ./testcases:/opt/prescient/testcases:ro

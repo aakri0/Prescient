@@ -1,0 +1,11 @@
+.git
+.github
+.claude
+build/
+output/
+*.so
+*.o
+__pycache__/
+*.pyc
+models/*.joblib
+.env
