@@ -16,7 +16,7 @@ using namespace llvm;
 
 namespace {
 
-// Per-function results. More fields are added in issues #10-#12.
+// Per-function results. More fields are added in issues #11-#12.
 struct FunctionFeatures {
   std::string function_name;
 
@@ -36,6 +36,12 @@ struct FunctionFeatures {
   unsigned max_loop_depth = 0;
   unsigned loop_body_instruction_count = 0;
   float loop_instruction_ratio = 0.0f;
+
+  // #10 — PHI node density
+  unsigned phi_node_count = 0;
+  float phi_density = 0.0f;
+  unsigned max_phi_in_single_bb = 0;
+  unsigned phi_node_incoming_edges = 0;
 };
 
 FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
@@ -81,6 +87,22 @@ FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
     FF.loop_instruction_ratio =
         (float)FF.loop_body_instruction_count / FF.instruction_count;
 
+  // #10 — PHI node density
+  for (BasicBlock &BB : F) {
+    unsigned bbPhi = 0;
+    for (Instruction &I : BB) {
+      if (auto *PN = dyn_cast<PHINode>(&I)) {
+        FF.phi_node_count++;
+        bbPhi++;
+        FF.phi_node_incoming_edges += PN->getNumIncomingValues();
+      }
+    }
+    if (bbPhi > FF.max_phi_in_single_bb)
+      FF.max_phi_in_single_bb = bbPhi;
+  }
+  if (FF.instruction_count > 0)
+    FF.phi_density = (float)FF.phi_node_count / FF.instruction_count;
+
   return FF;
 }
 
@@ -93,10 +115,9 @@ struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
     FunctionFeatures FF = analyzeFunction(F, FAM);
     errs() << "[IRComplexity] " << FF.function_name
            << ": insts=" << FF.instruction_count
-           << " bbs=" << FF.basic_block_count
            << " cyclomatic=" << FF.cyclomatic_complexity
            << " loops=" << FF.loop_count
-           << " max_depth=" << FF.max_loop_depth << "\n";
+           << " phis=" << FF.phi_node_count << "\n";
 
     return PreservedAnalyses::all();
   }
