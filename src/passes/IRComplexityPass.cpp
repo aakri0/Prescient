@@ -1,9 +1,10 @@
-// IR complexity feature extraction pass — skeleton (issue #6).
-// Feature groups are added in issues #7-#12; JSON export in #13.
+// IR complexity feature extraction pass.
+// Skeleton in #6; feature groups added in #7-#12; JSON export in #13.
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <string>
@@ -12,16 +13,46 @@ using namespace llvm;
 
 namespace {
 
-// Per-function results. Fields are added in issues #7-#12.
+// Per-function results. More fields are added in issues #8-#12.
 struct FunctionFeatures {
   std::string function_name;
+
+  // #7 — function size
+  unsigned instruction_count = 0;
+  unsigned basic_block_count = 0;
+  unsigned argument_count = 0;
+  unsigned call_site_count = 0;
 };
+
+FunctionFeatures analyzeFunction(Function &F) {
+  FunctionFeatures FF;
+  FF.function_name = F.getName().str();
+
+  // #7 — function size
+  FF.basic_block_count = F.size();
+  FF.argument_count = F.arg_size();
+  for (BasicBlock &BB : F) {
+    FF.instruction_count += BB.size();
+    for (Instruction &I : BB)
+      if (isa<CallInst>(I) || isa<InvokeInst>(I))
+        FF.call_site_count++;
+  }
+  return FF;
+}
 
 struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
     if (F.isDeclaration())
       return PreservedAnalyses::all();
     errs() << "[IRComplexity] Analyzing function: " << F.getName() << "\n";
+
+    FunctionFeatures FF = analyzeFunction(F);
+    errs() << "[IRComplexity] " << FF.function_name
+           << ": insts=" << FF.instruction_count
+           << " bbs=" << FF.basic_block_count
+           << " args=" << FF.argument_count
+           << " calls=" << FF.call_site_count << "\n";
+
     return PreservedAnalyses::all();
   }
 
