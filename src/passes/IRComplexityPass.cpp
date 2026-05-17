@@ -1,25 +1,38 @@
 // IR complexity feature extraction pass.
-// Skeleton in #6; feature groups added in #7-#12; JSON export in #13.
+// Implemented across issues #6 (skeleton), #7-#12 (feature groups),
+// and #13 (JSON export). Loadable plugin for the new Pass Manager.
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Format.h"
 
 #include <iterator>
 #include <string>
+#include <vector>
 
 using namespace llvm;
 
+static cl::opt<std::string> ComplexityOutput(
+    "complexity-output",
+    cl::desc("Path to write the extracted feature JSON array"),
+    cl::value_desc("path"), cl::init("features.json"));
+
 namespace {
 
-// Per-function results — the field set defines the JSON schema (issue #13).
+// Per-function results accumulated by the pass. The field set defines the
+// stable JSON schema consumed by the Python model (issue #13).
 struct FunctionFeatures {
   std::string function_name;
+  std::string source_file;
 
   // #7 — function size
   unsigned instruction_count = 0;
@@ -93,9 +106,11 @@ unsigned scoreType(Type *T, unsigned &maxPtrDepth, unsigned &structFields,
   return 1; // primitive type
 }
 
-FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
+FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM,
+                                 StringRef SourceFile) {
   FunctionFeatures FF;
   FF.function_name = F.getName().str();
+  FF.source_file = SourceFile.str();
 
   // #7 — function size
   FF.basic_block_count = F.size();
@@ -188,19 +203,85 @@ FunctionFeatures analyzeFunction(Function &F, FunctionAnalysisManager &FAM) {
   return FF;
 }
 
+void writeJSON(const std::vector<FunctionFeatures> &All) {
+  std::string Path = ComplexityOutput;
+  std::error_code EC;
+  raw_fd_ostream OS(Path, EC, sys::fs::OF_Text);
+  if (EC) {
+    errs() << "[IRComplexity] error: cannot open " << Path << ": "
+           << EC.message() << "\n";
+    return;
+  }
+
+  auto jstr = [](StringRef S, raw_ostream &O) {
+    O << '"';
+    for (char c : S) {
+      if (c == '"' || c == '\\')
+        O << '\\' << c;
+      else
+        O << c;
+    }
+    O << '"';
+  };
+
+  OS << "[";
+  for (size_t i = 0; i < All.size(); ++i) {
+    const FunctionFeatures &F = All[i];
+    OS << (i ? ",\n  {\n" : "\n  {\n");
+    OS << "    \"function_name\": ";
+    jstr(F.function_name, OS);
+    OS << ",\n";
+    OS << "    \"source_file\": ";
+    jstr(F.source_file, OS);
+    OS << ",\n";
+    OS << "    \"instruction_count\": " << F.instruction_count << ",\n";
+    OS << "    \"basic_block_count\": " << F.basic_block_count << ",\n";
+    OS << "    \"argument_count\": " << F.argument_count << ",\n";
+    OS << "    \"call_site_count\": " << F.call_site_count << ",\n";
+    OS << "    \"cfg_edge_count\": " << F.cfg_edge_count << ",\n";
+    OS << "    \"cyclomatic_complexity\": " << F.cyclomatic_complexity
+       << ",\n";
+    OS << "    \"max_bb_successors\": " << F.max_bb_successors << ",\n";
+    OS << "    \"loop_count\": " << F.loop_count << ",\n";
+    OS << "    \"max_loop_depth\": " << F.max_loop_depth << ",\n";
+    OS << "    \"loop_instruction_ratio\": "
+       << format("%.4f", F.loop_instruction_ratio) << ",\n";
+    OS << "    \"phi_node_count\": " << F.phi_node_count << ",\n";
+    OS << "    \"phi_density\": " << format("%.4f", F.phi_density) << ",\n";
+    OS << "    \"max_phi_in_single_bb\": " << F.max_phi_in_single_bb << ",\n";
+    OS << "    \"phi_node_incoming_edges\": " << F.phi_node_incoming_edges
+       << ",\n";
+    OS << "    \"type_complexity_score\": " << F.type_complexity_score
+       << ",\n";
+    OS << "    \"type_complexity_normalized\": "
+       << format("%.4f", F.type_complexity_normalized) << ",\n";
+    OS << "    \"max_pointer_depth\": " << F.max_pointer_depth << ",\n";
+    OS << "    \"struct_field_total\": " << F.struct_field_total << ",\n";
+    OS << "    \"total_memory_ops\": " << F.total_memory_ops << ",\n";
+    OS << "    \"alias_proxy_density\": "
+       << format("%.4f", F.alias_proxy_density) << ",\n";
+    OS << "    \"memory_write_ratio\": "
+       << format("%.4f", F.memory_write_ratio) << "\n";
+    OS << "  }";
+  }
+  OS << (All.empty() ? "]\n" : "\n]\n");
+}
+
+// Module pass: runs the per-function analysis over every defined function
+// and writes the accumulated features as a JSON array.
 struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
-    if (F.isDeclaration())
-      return PreservedAnalyses::all();
-    errs() << "[IRComplexity] Analyzing function: " << F.getName() << "\n";
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
+    FunctionAnalysisManager &FAM =
+        MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
 
-    FunctionFeatures FF = analyzeFunction(F, FAM);
-    errs() << "[IRComplexity] " << FF.function_name
-           << ": insts=" << FF.instruction_count
-           << " cyclomatic=" << FF.cyclomatic_complexity
-           << " mem_ops=" << FF.total_memory_ops
-           << " alias_density=" << FF.alias_proxy_density << "\n";
-
+    std::vector<FunctionFeatures> All;
+    for (Function &F : M) {
+      if (F.isDeclaration())
+        continue;
+      errs() << "[IRComplexity] Analyzing function: " << F.getName() << "\n";
+      All.push_back(analyzeFunction(F, FAM, M.getSourceFileName()));
+    }
+    writeJSON(All);
     return PreservedAnalyses::all();
   }
 
@@ -213,10 +294,10 @@ llvm::PassPluginLibraryInfo getIRComplexityPluginInfo() {
   return {LLVM_PLUGIN_API_VERSION, "IRComplexity", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
             PB.registerPipelineParsingCallback(
-                [](StringRef Name, FunctionPassManager &FPM,
+                [](StringRef Name, ModulePassManager &MPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                   if (Name == "ir-complexity") {
-                    FPM.addPass(IRComplexityPass());
+                    MPM.addPass(IRComplexityPass());
                     return true;
                   }
                   return false;
