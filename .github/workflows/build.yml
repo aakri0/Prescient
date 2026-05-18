@@ -1,0 +1,225 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build-plugin
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 17 + build tooling
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common ca-certificates
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg
+          CODENAME="$(lsb_release -cs)"
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-17 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            llvm-17 clang-17 llvm-17-dev libclang-17-dev lld-17 \
+            cmake ninja-build build-essential libzstd-dev
+          for t in clang clang++ opt llc llvm-config; do
+            sudo ln -sf "/usr/bin/${t}-17" "/usr/local/bin/${t}"
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Python packages
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+
+      - name: Build IRComplexityEstimator.so
+        run: ./build.sh
+
+      - name: Sanity check the plugin
+        run: |
+          test -f build/IRComplexityEstimator.so
+          file build/IRComplexityEstimator.so
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IRComplexityEstimator.so
+          path: build/IRComplexityEstimator.so
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: corpus-train-evaluate
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 17 toolchain
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common ca-certificates
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg
+          CODENAME="$(lsb_release -cs)"
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-17 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -y
+          sudo apt-get install -y llvm-17 clang-17 llvm-17-dev libzstd-dev
+          for t in clang clang++ opt llc llvm-config; do
+            sudo ln -sf "/usr/bin/${t}-17" "/usr/local/bin/${t}"
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Python packages
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: IRComplexityEstimator.so
+          path: build
+
+      - name: Restore executable bit on plugin
+        run: chmod +x build/IRComplexityEstimator.so || true
+
+      - name: Validate feature extractor on t01–t05
+        run: |
+          set -euxo pipefail
+          mkdir -p ci_features
+          for t in t01_simple_leaf t02_nested_loops t03_aliasing \
+                   t04_many_branches t05_type_complex; do
+            clang-17 -O0 -Xclang -disable-O0-optnone -emit-llvm -S \
+                "testcases/training/${t}.c" -o "ci_features/${t}.ll"
+            opt-17 -load-pass-plugin ./build/IRComplexityEstimator.so \
+                -passes=ir-complexity \
+                -complexity-output="ci_features/${t}.json" \
+                -disable-output "ci_features/${t}.ll"
+            python3 - "ci_features/${t}.json" <<'PY'
+          import json, sys
+          required = {
+              "function_name", "instruction_count", "basic_block_count",
+              "cyclomatic_complexity", "max_loop_depth",
+              "loop_instruction_ratio", "phi_density",
+              "type_complexity_normalized", "alias_proxy_density",
+          }
+          rows = json.loads(open(sys.argv[1]).read())
+          assert isinstance(rows, list) and rows, f"{sys.argv[1]} empty/not array"
+          for r in rows:
+              missing = required - r.keys()
+              assert not missing, f"{sys.argv[1]} {r.get('function_name')!r} missing {missing}"
+          print(f"{sys.argv[1]}: {len(rows)} function(s) OK")
+          PY
+          done
+
+      - name: Generate corpus
+        run: |
+          python3 scripts/generate_corpus.py \
+              --input-dir testcases/training \
+              --output training_data.csv \
+              --plugin build/IRComplexityEstimator.so
+
+      - name: Train model
+        run: |
+          python3 src/model/train_model.py \
+              --data training_data.csv \
+              --models-dir models \
+              --docs-dir docs
+
+      - name: Run evaluation
+        run: |
+          python3 scripts/evaluate.py \
+              --eval-dir testcases/evaluation \
+              --models-dir models \
+              --plugin build/IRComplexityEstimator.so \
+              --docs-dir docs
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation_results
+          path: |
+            docs/evaluation_results.json
+            docs/evaluation_plots/
+          if-no-files-found: error
+          retention-days: 30
+
+  smoke-test:
+    name: demo
+    needs: test
+    runs-on: ubuntu-22.04
+    env:
+      TERM: dumb
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 17 toolchain
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common ca-certificates
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg
+          CODENAME="$(lsb_release -cs)"
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-17 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -y
+          sudo apt-get install -y llvm-17 clang-17 llvm-17-dev libzstd-dev
+          for t in clang clang++ opt llc llvm-config; do
+            sudo ln -sf "/usr/bin/${t}-17" "/usr/local/bin/${t}"
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Python packages
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: IRComplexityEstimator.so
+          path: build
+
+      - name: Restore executable bit on plugin
+        run: chmod +x build/IRComplexityEstimator.so || true
+
+      - name: Train model (smoke test needs models/)
+        run: |
+          python3 scripts/generate_corpus.py \
+              --input-dir testcases/training \
+              --output training_data.csv \
+              --plugin build/IRComplexityEstimator.so
+          python3 src/model/train_model.py \
+              --data training_data.csv \
+              --models-dir models \
+              --docs-dir docs
+
+      - name: Run ./run.sh demo (non-interactive)
+        run: ./run.sh demo
