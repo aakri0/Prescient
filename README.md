@@ -191,6 +191,48 @@ $ ./scripts/run_adaptive.sh testcases/training/t02_nested_loops.c
 ===================================================
 ```
 
+## Custom Programs
+
+Yes — that's exactly what the `extract` and `predict` modes are for. The
+bundled testcases are just examples; the tools accept any C file path.
+
+Check complexity of your own program:
+
+```bash
+# native (Linux)
+./run.sh extract path/to/your_program.c
+
+# Docker — put the file somewhere mounted, e.g. testcases/, then:
+docker compose run --rm prescient extract testcases/your_program.c
+```
+
+This compiles your file to LLVM IR and writes `output/features.json` — one
+record per function with the 23 complexity metrics (instruction count,
+cyclomatic complexity, `max_loop_depth`, loop/PHI/type/alias densities,
+etc.).
+
+Predict its compile cost (after `./run.sh train` has populated `models/`):
+
+```bash
+./run.sh predict path/to/your_program.c     # -> output/predictions.json
+```
+
+That gives each function a `low`/`medium`/`high` tier, a microsecond
+estimate, and which passes are expected to be expensive.
+
+Caveats worth knowing:
+
+- **C only**, compilable by `clang-17` (the project is LLVM 17 / C-focused
+  — no C++ front-end wired up).
+- The file is compiled **standalone** with `clang -O0`. A self-contained
+  `.c` using only standard headers (`<stdio.h>`, etc.) works directly. A
+  file that `#include`s your own project headers would need extra `-I`
+  include paths, which `run.sh` doesn't currently expose — you'd have to
+  call `clang-17`/`opt-17` manually or preprocess first.
+- `predict` only reflects this project's model, which was trained on a
+  small 31-function corpus — treat the tiers as a rough signal, not ground
+  truth (see [docs/EVALUATION.md](docs/EVALUATION.md)).
+
 ## Repository Layout
 
 ```
