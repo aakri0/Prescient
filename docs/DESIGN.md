@@ -54,7 +54,7 @@ ad-hoc pipelines from raw pass names.
 ## 2. Feature selection rationale
 
 The twelve features in `FEATURE_COLUMNS` (see
-[train_model.py](src/model/train_model.py)) cluster into six groups.
+[train_model.py](../src/model/train_model.py)) cluster into six groups.
 Each group earns its place by a hypothesised correlation with at least
 one expensive O2 pass, and each group has a *known* failure mode.
 
@@ -95,7 +95,7 @@ optnone-disabled IR even when the optimised form will be PHI-heavy.
 `max_pointer_depth`.** Nested pointer-to-struct types blow up
 InstCombine's GEP simplification, Mem2Reg's type splitting and SLP's
 vectorisation heuristics. The recursive `scoreType` (in
-[IRComplexityPass.cpp](src/passes/IRComplexityPass.cpp)) is bounded
+[IRComplexityPass.cpp](../src/passes/IRComplexityPass.cpp)) is bounded
 by depth ≤ 10 to handle self-referential types. *Limitation:* LLVM 17
 defaults to opaque pointers, so the recursion bottoms out at depth 1 for
 pointer types and the score loses much of its discriminative power on
@@ -226,9 +226,9 @@ nothing in shipped LLVM gives you the cost *before* the pipeline runs.
 
 ## 7. Known failure modes
 
-See [test07_analysis.md](testcases/evaluation/test07_analysis.md) for
+See [test07_analysis.md](../testcases/evaluation/test07_analysis.md) for
 the worked example: `misleading_complex` in
-[test07_failure_case.c](testcases/evaluation/test07_failure_case.c)
+[test07_failure_case.c](../testcases/evaluation/test07_failure_case.c)
 presents a depth-3 loop nest full of instructions whose operands are all
 literal constants. The model sees a large `instruction_count` and a
 maximum `max_loop_depth` and predicts HIGH-tier; InstCombine + SCCP fold

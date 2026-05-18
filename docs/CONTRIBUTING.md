@@ -5,8 +5,8 @@ feature, adding passes to the adaptive skip list, and retraining on a new
 corpus. Each is documented below as a complete end-to-end walkthrough.
 
 > **Note on terminology.** The Python module at
-> [src/model/train_model.py](src/model/train_model.py) is referred to
-> throughout this document. The wrappers in [run.sh](run.sh) delegate
+> [src/model/train_model.py](../src/model/train_model.py) is referred to
+> throughout this document. The wrappers in [run.sh](../run.sh) delegate
 > training, prediction and evaluation to that module and to the
 > standalone scripts under [scripts/](scripts).
 
@@ -28,7 +28,7 @@ source of "feature added but predictions unchanged" bugs.
 **Step 1 — declare the field in the C++ struct.**
 
 Edit `FunctionFeatures` in
-[src/passes/IRComplexityPass.cpp:33](src/passes/IRComplexityPass.cpp).
+[src/passes/IRComplexityPass.cpp:33](../src/passes/IRComplexityPass.cpp).
 Add the new field with a sensible default. Keep its name in
 `snake_case` to match every other feature.
 
@@ -45,7 +45,7 @@ struct FunctionFeatures {
 **Step 2 — compute the value with LLVM APIs.**
 
 Add the computation inside `analyzeFunction` in the same file
-([IRComplexityPass.cpp:109](src/passes/IRComplexityPass.cpp)). The
+([IRComplexityPass.cpp:109](../src/passes/IRComplexityPass.cpp)). The
 single-pass structure of that function (one walk over basic blocks /
 instructions) is deliberate — keep your code inside the existing
 `for (BasicBlock &BB : F)` loop where possible so feature extraction
@@ -68,7 +68,7 @@ explicitly — `LoopAnalysis` by itself does not normalise loops. See
 **Step 3 — serialise the field in `writeJSON`.**
 
 Append the new field to the `OS << "    \"name\": …` block in
-[IRComplexityPass.cpp:227](src/passes/IRComplexityPass.cpp). Mind the
+[IRComplexityPass.cpp:227](../src/passes/IRComplexityPass.cpp). Mind the
 trailing comma — the last field of every object does *not* get a comma.
 For floats, use `format("%.4f", v)` to match the surrounding precision.
 
@@ -83,7 +83,7 @@ and re-links `IRComplexityEstimator.so`.
 
 **Step 5 — add the field to `FEATURE_COLUMNS`.**
 
-Edit [src/model/train_model.py:41](src/model/train_model.py). Add
+Edit [src/model/train_model.py:41](../src/model/train_model.py). Add
 the new column name to the `FEATURE_COLUMNS` list at the *end*. The
 order is part of the contract — see
 [IMPLEMENTATION.md §6](IMPLEMENTATION.md#6-python--c-integration).
@@ -145,7 +145,7 @@ discussing in a follow-up PR description.
 The adaptive pipeline currently skips `LoopVectorizePass` and
 `SLPVectorizerPass` on low-tier functions. Adding another pass is a
 two-step process: identify the pass class name LLVM uses, then add it
-to the filter in [AdaptivePipeline.cpp:103](src/passes/AdaptivePipeline.cpp).
+to the filter in [AdaptivePipeline.cpp:103](../src/passes/AdaptivePipeline.cpp).
 
 **Step 1 — find the pass class name.**
 
@@ -168,7 +168,7 @@ The second column is the class name (`LoopVectorizePass`, `GVNPass`,
 **Step 2 — modify the filter callback.**
 
 Edit
-[AdaptivePipeline.cpp:103-111](src/passes/AdaptivePipeline.cpp).
+[AdaptivePipeline.cpp:103-111](../src/passes/AdaptivePipeline.cpp).
 The lambda runs for every optional pass; return `false` to skip it.
 
 ```cpp
@@ -225,7 +225,7 @@ between baseline and adaptive runs. For a test file with no stdout
 output, the check degenerates to exit-code equality — which an empty
 `main` returning 0 will always pass. Add a printf of a deterministic
 checksum to any new test file (see
-[test07_failure_case.c](testcases/evaluation/test07_failure_case.c)
+[test07_failure_case.c](../testcases/evaluation/test07_failure_case.c)
 for the pattern: `printf("test07 result=%d\n", …)`), so the
 correctness check has something meaningful to diff.
 
@@ -331,7 +331,7 @@ This refreshes `docs/evaluation_results.json` and the three plots in
   name in square brackets — see any of the scripts in `src/model/` or
   `scripts/` for the pattern.
 - No external dependencies beyond what is already in
-  [requirements.txt](requirements.txt). Add a dependency only when
+  [requirements.txt](../requirements.txt). Add a dependency only when
   the alternative is a clearly worse implementation, and update both
   `requirements.txt` and `scripts/setup_env.sh` in the same commit.
 - Run `python3 -m py_compile <file>` on changed files; the CI does the

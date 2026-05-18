@@ -56,15 +56,14 @@ Four components feed each other:
 
 ## Documentation
 
-The full project documentation lives in the repository root alongside this
-README:
+The full project documentation lives in the `docs/` directory:
 
 | Document | What it covers |
 |---|---|
-| [DESIGN.md](DESIGN.md) | Why the feature set and model were chosen — design rationale and trade-offs |
-| [IMPLEMENTATION.md](IMPLEMENTATION.md) | How it is wired into LLVM — APIs used, pass internals, known gotchas |
-| [EVALUATION.md](EVALUATION.md) | Measured prediction accuracy and adaptive-pipeline savings |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to add features, passes, models or training data |
+| [DESIGN.md](docs/DESIGN.md) | Why the feature set and model were chosen — design rationale and trade-offs |
+| [IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | How it is wired into LLVM — APIs used, pass internals, known gotchas |
+| [EVALUATION.md](docs/EVALUATION.md) | Measured prediction accuracy and adaptive-pipeline savings |
+| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to add features, passes, models or training data |
 
 ## Prerequisites
 
@@ -156,10 +155,6 @@ $ ./scripts/run_adaptive.sh testcases/training/t02_nested_loops.c
 ├── Dockerfile, docker-compose.yml # reproducible build environment
 ├── requirements.txt               # Python dependencies (scikit-learn, pandas, …)
 ├── README.md                      # overview + quick start
-├── DESIGN.md                      # why this design — feature & model rationale
-├── IMPLEMENTATION.md              # how it's wired — LLVM APIs, gotchas
-├── EVALUATION.md                  # measured prediction & savings results
-├── CONTRIBUTING.md                # how to add features / passes / data
 ├── src/
 │   ├── passes/
 │   │   ├── IRComplexityPass.cpp   # feature extractor (LLVM module pass)
@@ -182,7 +177,12 @@ $ ./scripts/run_adaptive.sh testcases/training/t02_nested_loops.c
 │   ├── training/                  # ten C files used for training (t01…t10)
 │   └── evaluation/                # eight held-out C files (test01…test08)
 ├── models/                        # populated by train_model.py
-└── docs/                          # generated reports & plots (regenerated)
+└── docs/
+    ├── DESIGN.md                  # why this design — feature & model rationale
+    ├── IMPLEMENTATION.md          # how it's wired — LLVM APIs, gotchas
+    ├── EVALUATION.md              # measured prediction & savings results
+    ├── CONTRIBUTING.md            # how to add features / passes / data
+    └── (generated reports & plots — regenerated)
 ```
 
 ## Components
@@ -191,7 +191,7 @@ $ ./scripts/run_adaptive.sh testcases/training/t02_nested_loops.c
 per-instruction contributions for size, CFG edges, loop body coverage, PHI
 density, type complexity and memory-op density. It writes one JSON record
 per function, with a fixed schema that the Python model relies on.
-[IMPLEMENTATION.md](IMPLEMENTATION.md#feature-implementation-details)
+[IMPLEMENTATION.md](docs/IMPLEMENTATION.md#feature-implementation-details)
 documents the exact LLVM API used for each feature.
 
 **Timing wrapper.** A single `PassInstrumentationCallbacks` instance hooks
@@ -223,7 +223,7 @@ degrades to a normal O2 compile rather than silently skipping work.
 ## Evaluation
 
 Summary numbers from `scripts/evaluate.py` over the eight held-out files in
-`testcases/evaluation/` — see [EVALUATION.md](EVALUATION.md) for
+`testcases/evaluation/` — see [EVALUATION.md](docs/EVALUATION.md) for
 the full breakdown and the per-pass, per-test-case tables.
 
 | Metric | Value |
@@ -246,7 +246,7 @@ the full breakdown and the per-pass, per-test-case tables.
   Any pass with a data-dependent early exit (constant folding, dead-code
   elimination, profile-guided pruning) can collapse work that the static
   features still see — `testcases/evaluation/test07_failure_case.c` is the
-  worked example, analysed in [EVALUATION.md](EVALUATION.md#failure-case-analysis).
+  worked example, analysed in [EVALUATION.md](docs/EVALUATION.md#failure-case-analysis).
 - **Training-set size is small (ten C files, ~30 functions).** Cross-validation
   R² is reported but a wider corpus is needed before the absolute numbers
   generalise.
