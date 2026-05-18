@@ -145,11 +145,18 @@ private:
 
 } // namespace
 
-// Called from llvmGetPassPluginInfo (IRComplexityPass.cpp). The
-// instrumentation object is process-lived so its callbacks stay valid for
-// the entire opt run.
-void registerPassTiming(PassBuilder &PB) {
+// Register the timing callbacks on an arbitrary PassInstrumentationCallbacks.
+// The instrumentation object is process-lived so its callbacks stay valid
+// for the entire opt run. Used both for opt's own PIC and for the private
+// PIC that AdaptivePipeline.cpp drives its nested pipelines through, so
+// adaptive-run timings land in the same CSV.
+void registerTimingCallbacks(PassInstrumentationCallbacks &PIC) {
   static PassTimingInstrumentation Instrumentation;
+  Instrumentation.registerCallbacks(PIC);
+}
+
+// Called from llvmGetPassPluginInfo (IRComplexityPass.cpp).
+void registerPassTiming(PassBuilder &PB) {
   if (PassInstrumentationCallbacks *PIC = PB.getPassInstrumentationCallbacks())
-    Instrumentation.registerCallbacks(*PIC);
+    registerTimingCallbacks(*PIC);
 }

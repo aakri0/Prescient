@@ -294,6 +294,10 @@ struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
 // per-pass timing instrumentation on the same plugin's PassBuilder.
 void registerPassTiming(PassBuilder &PB);
 
+// Defined in src/passes/AdaptivePipeline.cpp (issue #21). Registers the
+// "adaptive-pipeline" pass on the same plugin's PassBuilder.
+void registerAdaptivePipeline(PassBuilder &PB);
+
 llvm::PassPluginLibraryInfo getIRComplexityPluginInfo() {
   return {LLVM_PLUGIN_API_VERSION, "IRComplexity", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
@@ -309,6 +313,8 @@ llvm::PassPluginLibraryInfo getIRComplexityPluginInfo() {
             // Hook the timing instrumentation into every opt invocation
             // that loads this plugin.
             registerPassTiming(PB);
+            // Make the "adaptive-pipeline" pass available.
+            registerAdaptivePipeline(PB);
           }};
 }
 
