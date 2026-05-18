@@ -8,7 +8,6 @@ cd "$ROOT_DIR"
 
 PLUGIN="build/IRComplexityEstimator.so"
 OUTPUT_DIR="output"
-MODEL_DIR="src/model"
 mkdir -p "$OUTPUT_DIR"
 
 if [[ -t 1 ]]; then
@@ -17,6 +16,7 @@ else
   RED=''; GREEN=''; NC=''
 fi
 err() { echo -e "${RED}error${NC}: $*" >&2; }
+ok()  { echo -e "${GREEN}$*${NC}"; }
 
 usage() {
   cat >&2 <<'EOF'
@@ -24,7 +24,7 @@ Usage: ./run.sh <mode> [args]
 
 Modes:
   extract <file.c>   Extract IR features from a C source file -> output/features.json
-  train              Train the model on testcases/training/
+  train              Build the training corpus and train the model
   predict <file.c>   Predict compile time for a C source file -> output/predictions.json
   evaluate           Run the full evaluation suite with metrics
   adaptive <file.c>  Run the adaptive pipeline and report savings
@@ -41,6 +41,12 @@ require_plugin() {
   [[ -f "$PLUGIN" ]] || { err "$PLUGIN not found — run ./build.sh first"; exit 1; }
 }
 
+require_models() {
+  [[ -f "models/training_metadata.json" ]] \
+    || { err "no trained model found — run ./run.sh train first"; exit 1; }
+}
+
+# Extract IR-complexity features from a C file into output/features.json.
 mode_extract() {
   local src="${1:-}"
   if [[ -z "$src" ]]; then err "extract requires a C source file"; usage; exit 1; fi
@@ -51,23 +57,38 @@ mode_extract() {
 
   local ll="$OUTPUT_DIR/$(basename "${src%.*}").ll"
   local json="$OUTPUT_DIR/features.json"
-  "$CLANG_BIN" -O0 -emit-llvm -S "$src" -o "$ll" \
+  "$CLANG_BIN" -O0 -Xclang -disable-O0-optnone -emit-llvm -S "$src" -o "$ll" \
     || { err "clang failed to emit IR for $src"; exit 1; }
   "$OPT_BIN" -load-pass-plugin "./$PLUGIN" -passes="ir-complexity" \
     -complexity-output="$json" -disable-output "$ll" \
     || { err "feature extraction pass failed"; exit 1; }
-  echo -e "${GREEN}extract${NC}: features written to $json"
+  ok "extract: features written to $json"
 }
 
-# Delegate to a Python script once it exists (added in later milestones).
-run_py() {
-  local script="$1"; shift
-  if [[ -f "$MODEL_DIR/$script" ]]; then
-    python3 "$MODEL_DIR/$script" "$@"
-  else
-    err "$MODEL_DIR/$script is not implemented yet (added in a later milestone)"
-    exit 1
-  fi
+# Build the training corpus from testcases/training/ and train the model.
+mode_train() {
+  require_plugin
+  local data="$OUTPUT_DIR/training_data.csv"
+  python3 scripts/generate_corpus.py \
+    --input-dir testcases/training --output "$data" --plugin "$PLUGIN" \
+    || { err "corpus generation failed"; exit 1; }
+  python3 src/model/train_model.py \
+    --data "$data" --models-dir models --docs-dir docs \
+    || { err "model training failed"; exit 1; }
+  ok "train: model written to models/"
+}
+
+# Predict compile time for one C file.
+mode_predict() {
+  local src="${1:-}"
+  if [[ -z "$src" ]]; then err "predict requires a C source file"; usage; exit 1; fi
+  require_models
+  mode_extract "$src"
+  python3 src/model/predict.py \
+    --features "$OUTPUT_DIR/features.json" --models-dir models \
+    --output "$OUTPUT_DIR/predictions.json" \
+    || { err "prediction failed"; exit 1; }
+  ok "predict: predictions written to $OUTPUT_DIR/predictions.json"
 }
 
 mode="${1:-}"
@@ -76,14 +97,15 @@ shift || true
 
 case "$mode" in
   extract)  mode_extract "${1:-}" ;;
-  train)    run_py train.py "$@" ;;
-  predict)
-    if [[ -z "${1:-}" ]]; then err "predict requires a C source file"; usage; exit 1; fi
-    run_py predict.py "$@" ;;
-  evaluate) run_py evaluate.py "$@" ;;
+  train)    mode_train ;;
+  predict)  mode_predict "${1:-}" ;;
+  evaluate)
+    require_plugin; require_models
+    python3 scripts/evaluate.py --eval-dir testcases/evaluation \
+      --models-dir models --plugin "$PLUGIN" --docs-dir docs ;;
   adaptive)
     if [[ -z "${1:-}" ]]; then err "adaptive requires a C source file"; usage; exit 1; fi
-    run_py adaptive.py "$@" ;;
+    exec "$ROOT_DIR/scripts/run_adaptive.sh" "$1" ;;
   demo)     exec "$ROOT_DIR/scripts/demo.sh" "$@" ;;
   -h|--help|help) usage ;;
   *)        err "unknown mode: $mode"; usage; exit 1 ;;
