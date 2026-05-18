@@ -290,6 +290,10 @@ struct IRComplexityPass : PassInfoMixin<IRComplexityPass> {
 
 } // namespace
 
+// Defined in src/timing/PassTimingWrapper.cpp (issue #14). Registers the
+// per-pass timing instrumentation on the same plugin's PassBuilder.
+void registerPassTiming(PassBuilder &PB);
+
 llvm::PassPluginLibraryInfo getIRComplexityPluginInfo() {
   return {LLVM_PLUGIN_API_VERSION, "IRComplexity", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
@@ -302,6 +306,9 @@ llvm::PassPluginLibraryInfo getIRComplexityPluginInfo() {
                   }
                   return false;
                 });
+            // Hook the timing instrumentation into every opt invocation
+            // that loads this plugin.
+            registerPassTiming(PB);
           }};
 }
 
