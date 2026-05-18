@@ -54,6 +54,18 @@ Four components feed each other:
    `O1` (with vectorisers skipped) for `low`-tier functions and at full
    `O2` for everything else.
 
+## Documentation
+
+The full project documentation lives in the repository root alongside this
+README:
+
+| Document | What it covers |
+|---|---|
+| [DESIGN.md](DESIGN.md) | Why the feature set and model were chosen — design rationale and trade-offs |
+| [IMPLEMENTATION.md](IMPLEMENTATION.md) | How it is wired into LLVM — APIs used, pass internals, known gotchas |
+| [EVALUATION.md](EVALUATION.md) | Measured prediction accuracy and adaptive-pipeline savings |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to add features, passes, models or training data |
+
 ## Prerequisites
 
 - Ubuntu 22.04
@@ -247,4 +259,4 @@ the full breakdown and the per-pass, per-test-case tables.
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE) for the full text.
+MIT — see [LICENSE](LICENSE) for the full text.
