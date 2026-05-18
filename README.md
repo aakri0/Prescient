@@ -67,31 +67,77 @@ The full project documentation lives in the `docs/` directory:
 
 ## Prerequisites
 
-- Ubuntu 22.04
-- LLVM 17 (`llvm-17`, `clang-17`, `llvm-17-dev` — installed by
-  [scripts/setup_env.sh](scripts/setup_env.sh) from `apt.llvm.org`)
-- CMake ≥ 3.20
-- Python ≥ 3.10 with the packages in [requirements.txt](requirements.txt)
+Pick one of two paths:
 
-`scripts/setup_env.sh` is the single source of truth for the toolchain
-versions; the CI workflow uses the same script.
+- **Docker** (any OS) — only Docker Engine / Docker Desktop is needed.
+  The image builds and runs everything inside Ubuntu 22.04. This is the
+  only supported path on macOS and Windows.
+- **Native** (Linux only) — Ubuntu 22.04, LLVM 17 (`llvm-17`, `clang-17`,
+  `llvm-17-dev`), CMake ≥ 3.20 and Python ≥ 3.10. `scripts/setup_env.sh`
+  installs all of these from `apt.llvm.org` and is the single source of
+  truth for toolchain versions (the CI workflow uses the same script).
 
-## Quick Start
+> The native toolchain is Ubuntu-only because `setup_env.sh` uses `apt`.
+> On macOS and Windows, use Docker.
 
-Five commands on a fresh Ubuntu 22.04 clone:
+## Getting Started
+
+In every path the order is the same: **build → train → run**. The model
+must be trained once before `demo`, `evaluate`, `predict` or `adaptive`
+will work. With Docker the trained model persists on the host via the
+`./models` volume, so `train` only needs to be run again when the code or
+training data changes.
+
+### Linux (Ubuntu 22.04)
+
+**Native:**
 
 ```bash
 git clone https://github.com/aakri0/Prescient.git && cd Prescient
-./scripts/setup_env.sh
-./build.sh
-./scripts/demo.sh
-python3 scripts/evaluate.py
+./scripts/setup_env.sh        # install LLVM 17 + Python deps (uses sudo apt)
+./build.sh                    # build build/IRComplexityEstimator.so
+./run.sh train                # generate the corpus and train the model
+./run.sh demo                 # narrated five-act demo
+./run.sh evaluate             # full evaluation suite -> docs/evaluation_results.json
 ```
 
-The first three commands provision the toolchain and build
-`build/IRComplexityEstimator.so`. The fourth runs the narrated five-act
-demo. The fifth runs the full evaluation suite and refreshes
-`docs/evaluation_results.json`.
+**Docker:**
+
+```bash
+git clone https://github.com/aakri0/Prescient.git && cd Prescient
+docker compose build                        # build the image (installs LLVM 17)
+docker compose run --rm prescient train     # generate the corpus and train the model
+docker compose run --rm prescient demo      # narrated five-act demo
+docker compose run --rm prescient evaluate  # full evaluation suite
+```
+
+### macOS
+
+The native toolchain is not supported on macOS (no `apt`). Use Docker:
+
+```bash
+git clone https://github.com/aakri0/Prescient.git && cd Prescient
+docker compose build                        # build the image (installs LLVM 17)
+docker compose run --rm prescient train     # generate the corpus and train the model
+docker compose run --rm prescient demo      # narrated five-act demo
+docker compose run --rm prescient evaluate  # full evaluation suite
+```
+
+### Windows
+
+Use Docker Desktop (WSL 2 backend recommended). Run in PowerShell:
+
+```powershell
+git clone https://github.com/aakri0/Prescient.git
+cd Prescient
+docker compose build                        # build the image (installs LLVM 17)
+docker compose run --rm prescient train     # generate the corpus and train the model
+docker compose run --rm prescient demo      # narrated five-act demo
+docker compose run --rm prescient evaluate  # full evaluation suite
+```
+
+> The first `docker compose build` takes a few minutes — it installs the
+> LLVM 17 toolchain into the image. Subsequent runs are cached.
 
 ## Usage
 
