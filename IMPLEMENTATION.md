@@ -31,7 +31,7 @@ pass is:
 1. `opt -load-pass-plugin ./build/IRComplexityEstimator.so` calls
    `dlopen(3)` on the `.so`.
 2. `opt` looks up the `llvmGetPassPluginInfo` symbol — declared in
-   [IRComplexityPass.cpp:321](../src/passes/IRComplexityPass.cpp) — and
+   [IRComplexityPass.cpp:321](src/passes/IRComplexityPass.cpp) — and
    calls it.
 3. The function returns a `llvm::PassPluginLibraryInfo` struct
    containing a `RegisterPassBuilderCallbacks` lambda.
@@ -60,11 +60,11 @@ that ships in the same plugin:
    `PB.registerPipelineParsingCallback(...)` with the pass's command-line
    name.
 3. Forward-declare `registerYourPass` in
-   [IRComplexityPass.cpp](../src/passes/IRComplexityPass.cpp) and call it
+   [IRComplexityPass.cpp](src/passes/IRComplexityPass.cpp) and call it
    from the plugin's `RegisterPassBuilderCallbacks` lambda — exactly the
    way `registerAdaptivePipeline` is wired today.
 4. Append the new `.cpp` to the `add_library(IRComplexityEstimator
-   MODULE …)` call in [CMakeLists.txt](../CMakeLists.txt) and rebuild.
+   MODULE …)` call in [CMakeLists.txt](CMakeLists.txt) and rebuild.
 
 There is no `.h` header for the plugin: the only cross-file linkage is
 the three free functions named above, declared inline in
@@ -75,7 +75,7 @@ encourage out-of-plugin coupling.
 ## 2. Feature implementation details
 
 All extraction lives in [IRComplexityPass.cpp:109
-`analyzeFunction`](../src/passes/IRComplexityPass.cpp). One scan of each
+`analyzeFunction`](src/passes/IRComplexityPass.cpp). One scan of each
 basic block computes every feature; the only nested traversal is the
 recursive `scoreType` for type complexity. Per-feature APIs:
 
@@ -106,7 +106,7 @@ the maximum across blocks, not the total — see
 why.
 
 **Type complexity.** The recursive `scoreType` in
-[IRComplexityPass.cpp:79](../src/passes/IRComplexityPass.cpp) walks
+[IRComplexityPass.cpp:79](src/passes/IRComplexityPass.cpp) walks
 LLVM types via `Type::getTypeID()` plus `dyn_cast<StructType>` /
 `dyn_cast<ArrayType>` / `dyn_cast<VectorType>`. `StructType::elements()`
 gives the element-type range for the recursion. Pointer depth is
@@ -130,7 +130,7 @@ loop. No callee analysis is performed; the count is local.
 
 ## 3. Timing instrumentation
 
-[PassTimingWrapper.cpp](../src/timing/PassTimingWrapper.cpp) defines a
+[PassTimingWrapper.cpp](src/timing/PassTimingWrapper.cpp) defines a
 single `PassTimingInstrumentation` class with a process-lived instance
 (returned by a function-local `static`, so it never relies on global
 constructor order). Hook registration:
@@ -183,7 +183,7 @@ every row (`OS->flush()`), so a later opt crash never loses the
 preceding rows.
 
 `registerTimingCallbacks(PIC)` is reused from
-[AdaptivePipeline.cpp:113](../src/passes/AdaptivePipeline.cpp) so the
+[AdaptivePipeline.cpp:113](src/passes/AdaptivePipeline.cpp) so the
 *nested* pipelines that the adaptive pass runs go through the same
 instrumentation and land in the same CSV.
 
@@ -193,7 +193,7 @@ LLVM 17 makes opaque pointers the default: an `i32*` and a `%struct.S*`
 have the same `Type` and there is no way to recover the pointee type
 from the pointer type alone. Our type-complexity recursion handles this
 explicitly in
-[IRComplexityPass.cpp:84-92](../src/passes/IRComplexityPass.cpp):
+[IRComplexityPass.cpp:84-92](src/passes/IRComplexityPass.cpp):
 
 ```cpp
 if (T->isPointerTy()) {
@@ -227,7 +227,7 @@ not through a JSON library. The reasons are simple:
   RapidJSON, …) widens the link surface and the build matrix.
 - The schema is fixed and shallow — a flat array of flat objects.
   Manual emission is ~30 lines of code in `writeJSON`
-  ([IRComplexityPass.cpp:206](../src/passes/IRComplexityPass.cpp)) and
+  ([IRComplexityPass.cpp:206](src/passes/IRComplexityPass.cpp)) and
   has no failure modes a library would catch.
 - Floats are emitted with `format("%.4f", v)` for stable diffability of
   the JSON across runs.
@@ -247,7 +247,7 @@ The contract between the C++ extractor and the Python model is two
 files plus one promise:
 
 1. **`features.json`** — flat array, schema fixed by
-   `FunctionFeatures` ([IRComplexityPass.cpp:33](../src/passes/IRComplexityPass.cpp)).
+   `FunctionFeatures` ([IRComplexityPass.cpp:33](src/passes/IRComplexityPass.cpp)).
 2. **`models/feature_scaler.joblib`** — the `StandardScaler` saved by
    `train_model.py` after fitting on the training corpus. Predictions
    must apply *this* scaler — refitting at predict time would scale a
@@ -273,8 +273,8 @@ plugin will hit them again.
 returns `true` for externals — functions with no body. Iterating their
 basic blocks gives garbage (`F.size() == 0`, no `BasicBlock`s to scan)
 and any feature read on them is uninformative noise. Both
-[IRComplexityPass.cpp:279](../src/passes/IRComplexityPass.cpp) and
-[AdaptivePipeline.cpp:135](../src/passes/AdaptivePipeline.cpp) skip
+[IRComplexityPass.cpp:279](src/passes/IRComplexityPass.cpp) and
+[AdaptivePipeline.cpp:135](src/passes/AdaptivePipeline.cpp) skip
 declarations before doing anything.
 
 **Loop-simplify form dependency.** `LoopAnalysis` does not itself put
@@ -296,7 +296,7 @@ rows.
 `any_cast<T>(&v) != nullptr`. The deprecation is silent at compile
 time; the only sign is that examples on the LLVM wiki using `any_isa`
 fail to build. We use the pointer-returning overload throughout (see
-[PassTimingWrapper.cpp:44-47](../src/timing/PassTimingWrapper.cpp)).
+[PassTimingWrapper.cpp:44-47](src/timing/PassTimingWrapper.cpp)).
 
 **Linking the plugin against LLVM component libraries.** Do not. The
 plugin is `dlopen`'d into `opt`, which already provides every LLVM
@@ -304,7 +304,7 @@ symbol; linking the component libraries into the plugin registers the
 LLVM command-line options a second time and aborts `opt` with `Option
 registered more than once`. The comment block above
 `llvm_map_components_to_libnames` in
-[CMakeLists.txt:42-50](../CMakeLists.txt) documents this — the call is
+[CMakeLists.txt:42-50](CMakeLists.txt) documents this — the call is
 present only so a future contributor reading the CMake file does not
 add `target_link_libraries(IRComplexityEstimator ${LLVM_COMPONENT_LIBS})`
 thinking it was forgotten.

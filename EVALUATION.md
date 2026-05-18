@@ -1,7 +1,7 @@
 # EVALUATION.md — Measured results
 
 This document reports the numbers produced by
-[scripts/evaluate.py](../scripts/evaluate.py) on the held-out
+[scripts/evaluate.py](scripts/evaluate.py) on the held-out
 `testcases/evaluation/` corpus. Every table is sourced from
 `docs/evaluation_results.json` and is regenerated end-to-end whenever
 `./run.sh evaluate` is executed. The numbers below correspond to the
@@ -11,17 +11,17 @@ reproduced verbatim from that JSON.
 ## 1. Methodology
 
 **Training corpus.** Ten C source files in
-[testcases/training/](../testcases/training) (`t01_simple_leaf.c` …
+[testcases/training/](testcases/training) (`t01_simple_leaf.c` …
 `t10_pathological.c`) covering ten complexity patterns: simple leaves,
 nested loops, aliasing, branching, type complexity, PHI-heavy regions,
 large straight-line code, recursion, SIMD-friendly loops and a
 pathological case. After
-[generate_corpus.py](../scripts/generate_corpus.py) compiles each file
+[generate_corpus.py](scripts/generate_corpus.py) compiles each file
 to unoptimised IR, extracts features and times every per-function pass
 under `default<O2>`, the joined corpus contains **31 functions**.
 
 **Test corpus.** Eight independent C source files in
-[testcases/evaluation/](../testcases/evaluation) (`test01_arith_eval.c`
+[testcases/evaluation/](testcases/evaluation) (`test01_arith_eval.c`
 … `test08_mixed_eval.c`) totalling **17 functions**, none of which
 appear in the training corpus. They were authored independently of the
 training files so the model has never seen them in any form. The
@@ -108,7 +108,7 @@ average it out).
 ## 5. Adaptive pipeline results
 
 Compile-time savings and code-quality regressions from running
-[scripts/run_adaptive.sh](../scripts/run_adaptive.sh) on each evaluation
+[scripts/run_adaptive.sh](scripts/run_adaptive.sh) on each evaluation
 file and comparing the adaptive run against a baseline full-O2 run.
 Quality is wall-clock execution time of the linked binary, taken as the
 min of 5 repetitions.
@@ -141,7 +141,7 @@ reuses the analyses, whereas the baseline rebuilds them per invocation.
 ## 6. Failure case analysis
 
 `test07_failure_case.c` is the worked failure described in
-[test07_analysis.md](../testcases/evaluation/test07_analysis.md). The
+[test07_analysis.md](testcases/evaluation/test07_analysis.md). The
 function `misleading_complex` presents three of the model's strongest
 cost signals at high values: `instruction_count = 412`, `max_loop_depth
 = 3`, `loop_instruction_ratio = 0.98`. The model predicts a HIGH-tier
@@ -160,7 +160,7 @@ The fix is one new feature — a *loop-invariant instruction ratio* over
 the unoptimised IR — that would let the model discount
 `instruction_count` and `max_loop_depth` when the in-loop body is
 dominated by loop-invariant computations.
-[test07_analysis.md](../testcases/evaluation/test07_analysis.md) walks
+[test07_analysis.md](testcases/evaluation/test07_analysis.md) walks
 through the exact computation.
 
 ## 7. Conclusions
