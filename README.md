@@ -193,9 +193,6 @@ $ ./scripts/run_adaptive.sh testcases/training/t02_nested_loops.c
 
 ## Custom Programs
 
-Yes — that's exactly what the `extract` and `predict` modes are for. The
-bundled testcases are just examples; the tools accept any C file path.
-
 Check complexity of your own program:
 
 ```bash
