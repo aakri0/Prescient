@@ -84,7 +84,7 @@ case "$mode" in
   adaptive)
     if [[ -z "${1:-}" ]]; then err "adaptive requires a C source file"; usage; exit 1; fi
     run_py adaptive.py "$@" ;;
-  demo)     run_py demo.py "$@" ;;
+  demo)     exec "$ROOT_DIR/scripts/demo.sh" "$@" ;;
   -h|--help|help) usage ;;
   *)        err "unknown mode: $mode"; usage; exit 1 ;;
 esac
