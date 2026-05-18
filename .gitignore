@@ -8,8 +8,16 @@ output/
 __pycache__/
 *.pyc
 
-# Trained models
+# Trained models and generated data/report artifacts
 models/*.joblib
+models/*.json
+training_data.csv
+features.json
+predictions.json
+timings.csv
+docs/feature_importance.png
+docs/correlation_heatmap.png
+docs/feature_importance_report.md
 
 # Environment
 .env
