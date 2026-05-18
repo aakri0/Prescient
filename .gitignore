@@ -18,6 +18,9 @@ timings.csv
 docs/feature_importance.png
 docs/correlation_heatmap.png
 docs/feature_importance_report.md
+docs/evaluation_results.json
+docs/evaluation_plots/
+docs/savings_report.md
 
 # Environment
 .env
