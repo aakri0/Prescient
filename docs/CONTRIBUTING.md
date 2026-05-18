@@ -1,0 +1,354 @@
+# CONTRIBUTING.md — How to extend Prescient
+
+There are three useful ways to extend this project: adding a new IR
+feature, adding passes to the adaptive skip list, and retraining on a new
+corpus. Each is documented below as a complete end-to-end walkthrough.
+
+> **Note on terminology.** The Python module at
+> [src/model/train_model.py](../src/model/train_model.py) is referred to
+> throughout this document. The wrappers in [run.sh](../run.sh) delegate
+> training, prediction and evaluation to that module and to the
+> standalone scripts under [scripts/](../scripts).
+
+---
+
+## Section 1 — Adding a new IR feature
+
+The whole feature loop touches one C++ file, one Python module, two
+scripts and one JSON metadata artefact. Skipping a step is the usual
+source of "feature added but predictions unchanged" bugs.
+
+> ⚠️  **Adding a feature invalidates the existing saved models.** The
+> `StandardScaler` and every `*.joblib` model in `models/` were fit to a
+> specific feature column order, so they cannot accept a vector with a
+> new column. **Always retrain after adding a feature.** `predict.py`
+> will warn and fill the new column with `0` until you do, which is
+> exactly the silent-degradation case you do not want shipped.
+
+**Step 1 — declare the field in the C++ struct.**
+
+Edit `FunctionFeatures` in
+[src/passes/IRComplexityPass.cpp:33](../src/passes/IRComplexityPass.cpp).
+Add the new field with a sensible default. Keep its name in
+`snake_case` to match every other feature.
+
+```cpp
+struct FunctionFeatures {
+    // existing fields …
+
+    // #N — your-feature-group description
+    unsigned my_new_count = 0;
+    float    my_new_density = 0.0f;
+};
+```
+
+**Step 2 — compute the value with LLVM APIs.**
+
+Add the computation inside `analyzeFunction` in the same file
+([IRComplexityPass.cpp:109](../src/passes/IRComplexityPass.cpp)). The
+single-pass structure of that function (one walk over basic blocks /
+instructions) is deliberate — keep your code inside the existing
+`for (BasicBlock &BB : F)` loop where possible so feature extraction
+stays O(N) in instruction count. Useful APIs cluster by where they live:
+
+- `llvm/IR/Function.h` — `F.size()`, `F.arg_size()`, `F.empty()`
+- `llvm/IR/Instructions.h` + `IntrinsicInst.h` — `isa<XxxInst>(I)`,
+  `dyn_cast<IntrinsicInst>(&I)->getIntrinsicID()`
+- `llvm/IR/CFG.h` — `succ_begin(BB)`, `succ_end(BB)`,
+  `pred_begin(BB)`, `pred_end(BB)`
+- `llvm/Analysis/LoopInfo.h` — `LoopInfo &LI = FAM.getResult<LoopAnalysis>(F)`,
+  `Loop::getLoopDepth()`, `Loop::isLoopInvariant(V)`
+- `llvm/IR/DerivedTypes.h` — `dyn_cast<StructType>(T)`,
+  `T->isPointerTy()`, `T->isOpaquePointerTy()`
+
+If your feature needs `LoopSimplify` form or LCSSA, request the analysis
+explicitly — `LoopAnalysis` by itself does not normalise loops. See
+[IMPLEMENTATION.md §7](IMPLEMENTATION.md#7-known-llvm-gotchas).
+
+**Step 3 — serialise the field in `writeJSON`.**
+
+Append the new field to the `OS << "    \"name\": …` block in
+[IRComplexityPass.cpp:227](../src/passes/IRComplexityPass.cpp). Mind the
+trailing comma — the last field of every object does *not* get a comma.
+For floats, use `format("%.4f", v)` to match the surrounding precision.
+
+**Step 4 — rebuild the plugin.**
+
+```bash
+./build.sh
+```
+
+A clean build is not necessary; CMake picks up the new source change
+and re-links `IRComplexityEstimator.so`.
+
+**Step 5 — add the field to `FEATURE_COLUMNS`.**
+
+Edit [src/model/train_model.py:41](../src/model/train_model.py). Add
+the new column name to the `FEATURE_COLUMNS` list at the *end*. The
+order is part of the contract — see
+[IMPLEMENTATION.md §6](IMPLEMENTATION.md#6-python--c-integration).
+
+```python
+FEATURE_COLUMNS = [
+    "instruction_count",
+    # … existing entries unchanged …
+    "max_pointer_depth",
+    "my_new_density",   # newly added
+]
+```
+
+If your feature is also relevant to a specific pass, consider adding a
+matching `time_<Pass>` column to `PER_PASS_TARGETS` so the per-pass
+regression picks up the new signal.
+
+**Step 6 — regenerate the training corpus.**
+
+The corpus CSV is keyed by the feature columns the extractor emitted at
+generation time. Re-running it picks up your new field.
+
+```bash
+python3 scripts/generate_corpus.py \
+    --input-dir testcases/training/ \
+    --output training_data.csv \
+    --plugin ./build/IRComplexityEstimator.so
+```
+
+You should see `training_data.csv` grow by one column.
+
+**Step 7 — retrain the model.**
+
+```bash
+python3 src/model/train_model.py \
+    --data training_data.csv \
+    --models-dir models/ \
+    --docs-dir docs/
+```
+
+This rewrites every file in `models/` — the scaler, the three primary
+models, the per-pass models and `training_metadata.json` — using the new
+feature column order. `predict.py` will load the new metadata
+automatically on the next prediction.
+
+**Step 8 — verify the feature shows up in the importance report.**
+
+Open [docs/feature_importance_report.md](feature_importance_report.md)
+(regenerated by step 7). Your new feature should appear in the table
+with a coefficient and a correlation with `total_compile_time_us`. If
+the correlation is near zero, the feature may be redundant or only
+informative in combination — both are useful findings, both are worth
+discussing in a follow-up PR description.
+
+---
+
+## Section 2 — Adding new passes to the skip list
+
+The adaptive pipeline currently skips `LoopVectorizePass` and
+`SLPVectorizerPass` on low-tier functions. Adding another pass is a
+two-step process: identify the pass class name LLVM uses, then add it
+to the filter in [AdaptivePipeline.cpp:103](../src/passes/AdaptivePipeline.cpp).
+
+**Step 1 — find the pass class name.**
+
+The string that goes in the filter is the *C++ class name* of the pass,
+not the command-line name. The reliable way to find it is to run opt
+with the per-pass timing plugin on a sample file and look at the CSV:
+
+```bash
+clang-17 -O0 -Xclang -disable-O0-optnone -emit-llvm -S \
+    testcases/training/t02_nested_loops.c -o /tmp/x.ll
+opt-17 -load-pass-plugin ./build/IRComplexityEstimator.so \
+    -passes="default<O2>" -timing-output=/tmp/timings.csv \
+    -disable-output /tmp/x.ll
+column -ts, /tmp/timings.csv | sort -k3 -t, -nr | head
+```
+
+The second column is the class name (`LoopVectorizePass`, `GVNPass`,
+`InstCombinePass`, …). Any of those strings can go in the filter.
+
+**Step 2 — modify the filter callback.**
+
+Edit
+[AdaptivePipeline.cpp:103-111](../src/passes/AdaptivePipeline.cpp).
+The lambda runs for every optional pass; return `false` to skip it.
+
+```cpp
+PIC.registerShouldRunOptionalPassCallback(
+    [this](StringRef PassID, Any IR) -> bool {
+        if (PassID != "LoopVectorizePass" &&
+            PassID != "SLPVectorizerPass" &&
+            PassID != "YourNewPassClassName")
+            return true;
+        if (const Function *const *F = any_cast<const Function *>(&IR))
+            if (tierFor((*F)->getName()) == Tier::Low)
+                return false; // skip this pass
+        return true;
+    });
+```
+
+**Step 3 — pick the right tier(s).**
+
+The example above skips the new pass for the `low` tier only. To skip
+it for `low` *and* `medium`, change the comparison:
+
+```cpp
+Tier t = tierFor((*F)->getName());
+if (t == Tier::Low || t == Tier::Medium)
+    return false;
+```
+
+Skipping for `high` is rarely correct — the high tier exists precisely
+because the function needs full O2 — but the mechanism does not
+prevent it.
+
+**Step 4 — run correctness tests.**
+
+The end-to-end workflow runs a baseline binary and an adaptive binary
+and `diff`s their output. Any new skip must keep this diff clean for
+the entire evaluation corpus.
+
+```bash
+for f in testcases/evaluation/*.c; do
+    ./scripts/run_adaptive.sh "$f" || { echo "FAIL: $f"; exit 1; }
+done
+```
+
+`scripts/run_adaptive.sh` prints `correctness : PASS` or `FAIL` for
+each file. **Every file must report PASS** before the change is
+mergeable. A `FAIL` means the skipped pass was load-bearing for that
+function's semantics, not just its speed; the skip set must be made
+more restrictive or rolled back.
+
+**Step 5 — verify program semantics, not just exit codes.**
+
+`run_adaptive.sh`'s correctness check compares stdout *and* exit code
+between baseline and adaptive runs. For a test file with no stdout
+output, the check degenerates to exit-code equality — which an empty
+`main` returning 0 will always pass. Add a printf of a deterministic
+checksum to any new test file (see
+[test07_failure_case.c](../testcases/evaluation/test07_failure_case.c)
+for the pattern: `printf("test07 result=%d\n", …)`), so the
+correctness check has something meaningful to diff.
+
+---
+
+## Section 3 — Retraining on a new corpus
+
+The model is intentionally easy to retrain. The minimum new-corpus
+recipe:
+
+**Step 1 — place new C source files in `testcases/training/`.**
+
+One function per file is fine; multiple functions per file is also
+fine (the corpus generator joins on `function_name`, not on file). Each
+file must be self-contained C that compiles under `clang-17 -O0
+-Xclang -disable-O0-optnone`. Files with `#include` of system headers
+are allowed.
+
+The training files do not need a `main` — they are compiled to IR and
+then handed to opt, not linked into a binary.
+
+> **Minimum recommended corpus size: 30 functions across at least 5
+> distinct complexity patterns.** Anything smaller will fail the
+> in-script `R² > 0.5` guard in cross-validation (which fires a
+> warning, not an error). The ten existing training files cover ten
+> complexity patterns — see [DESIGN.md §2](DESIGN.md#2-feature-selection-rationale)
+> for what each pattern is meant to exercise.
+
+**Step 2 — regenerate the corpus CSV.**
+
+```bash
+python3 scripts/generate_corpus.py \
+    --input-dir testcases/training/ \
+    --output training_data.csv \
+    --plugin ./build/IRComplexityEstimator.so
+```
+
+The script prints the per-file function count and the final row count.
+If a file produced zero functions, it was probably empty or only
+declarations — the script skips and warns rather than failing.
+
+**Step 3 — retrain.**
+
+```bash
+python3 src/model/train_model.py \
+    --data training_data.csv \
+    --models-dir models/ \
+    --docs-dir docs/
+```
+
+Watch the 5-fold cross-validation table that is printed. The acceptance
+target is **R² > 0.5 on `LinearRegression`**. If you see lower than
+that, the train_model script will emit:
+
+```
+WARNING: LinearRegression R2 = 0.41 (< 0.5). The dataset is likely too
+small or too noisy — collect more training samples before trusting
+predictions.
+```
+
+Below 0.5 the model still loads and runs, but its predictions are
+noise. Add more complexity patterns (not more variations on the same
+pattern) before relying on it.
+
+**Step 4 — re-evaluate.**
+
+```bash
+python3 scripts/evaluate.py \
+    --eval-dir testcases/evaluation \
+    --models-dir models \
+    --plugin build/IRComplexityEstimator.so \
+    --docs-dir docs
+```
+
+This refreshes `docs/evaluation_results.json` and the three plots in
+`docs/evaluation_plots/`. If you also edited
+[EVALUATION.md](EVALUATION.md), update its tables from the new JSON.
+
+---
+
+## Section 4 — Code style
+
+**C++.**
+
+- C++17. Match LLVM's `clang-format` defaults: two-space indent, no
+  tabs, `Allman`-style brace placement on namespaces, K&R on functions.
+- `using namespace llvm;` is permitted at translation-unit scope inside
+  `.cpp` files. Do not introduce any `.h` headers that would force this
+  on consumers.
+- Comments are kept to `//` line comments; `/** */` doc comments are
+  reserved for the rare API exposed across files (currently:
+  `registerPassTiming`, `registerAdaptivePipeline`).
+- LLVM 17 idioms only: prefer `any_cast<T>(&v)` over `any_isa<T>`,
+  `Type::isOpaquePointerTy()` over assuming non-opaque pointers, the new
+  pass manager over the legacy one.
+
+**Python.**
+
+- Python ≥ 3.10, type-annotated where the type is non-obvious.
+  `from __future__ import annotations` at the top of every module
+  (matches existing files).
+- One module-level `log(msg)` helper per script, prefixing the script
+  name in square brackets — see any of the scripts in `src/model/` or
+  `scripts/` for the pattern.
+- No external dependencies beyond what is already in
+  [requirements.txt](../requirements.txt). Add a dependency only when
+  the alternative is a clearly worse implementation, and update both
+  `requirements.txt` and `scripts/setup_env.sh` in the same commit.
+- Run `python3 -m py_compile <file>` on changed files; the CI does the
+  same.
+
+**Commit messages.**
+
+The existing history uses single-line imperative subjects with an
+optional body, referencing the issue number in parentheses:
+
+```
+Add loop-invariant ratio feature (#33)
+
+Closes the test07 over-prediction class. Adds one column to
+FEATURE_COLUMNS; required regenerating the training corpus.
+```
+
+PRs that touch the plugin should mention which `models/` artefacts were
+regenerated; PRs that change `models/` directly (without retraining
+from source) should not exist.
