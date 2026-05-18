@@ -14,3 +14,7 @@ services:
       # locally added test cases without rebuilding the image.
       - ./output:/opt/prescient/output
       - ./testcases:/opt/prescient/testcases:ro
+      # Persist the trained model across runs, so `train` and `demo`/
+      # `evaluate`/`predict` can be invoked as separate `docker compose run`
+      # commands.
+      - ./models:/opt/prescient/models
