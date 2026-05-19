@@ -167,12 +167,27 @@ Excerpt of `output/features.json`:
 ]
 ```
 
-Predict its compile cost (after `train` has populated `models/`):
+Predict its compile cost (after `./run.sh train` has populated `models/`):
 
 ```bash
-$ python3 src/model/predict.py --features output/features.json \
-        --models-dir models/ --output output/predictions.json
-[predict] wrote 1 prediction(s) to output/predictions.json (low=0, medium=1, high=0)
+$ ./run.sh predict testcases/training/t02_nested_loops.c
+```
+
+`predict` prints readable tables — IR features, compile-time predictions
+and predicted per-pass cost — and writes the full detail to
+`output/predictions.json`:
+
+```
+==============================================================================
+  COMPILE-TIME PREDICTIONS
+==============================================================================
+  Function          Tier     Pred (us)   Pred (ms)   Confidence
+  -------------------------------------------------------------
+  matrix_multiply   medium       4,180        4.18   high
+  matrix_scale      medium       2,344        2.34   high
+  matrix_trace      medium       1,514        1.51   high
+
+  Tier summary : low=0  medium=3  high=0   (of 3 function(s))
 ```
 
 Run the full adaptive workflow on one file, with a savings report:
@@ -192,6 +207,16 @@ $ ./scripts/run_adaptive.sh testcases/training/t02_nested_loops.c
 ```
 
 ## Custom Programs
+
+The `extract` and `predict` modes accept any C file path — the bundled
+testcases are only examples. A ready-made sample, `testcases/sample_math.c`
+(a small program of arithmetic, loop, recursion and branch functions), is
+included to try the modes on:
+
+```bash
+./run.sh extract testcases/sample_math.c
+docker compose run --rm prescient extract testcases/sample_math.c
+```
 
 Check complexity of your own program:
 
@@ -249,7 +274,8 @@ Caveats worth knowing:
 │   └── model/
 │       ├── train_model.py         # 5-fold CV + final fit + per-pass models
 │       ├── predict.py             # CLI: features.json → predictions.json
-│       └── feature_importance.py  # docs/feature_importance_report.md + plots
+│       ├── feature_importance.py  # docs/feature_importance_report.md + plots
+│       └── _render.py             # shared terminal-table helper
 ├── scripts/
 │   ├── setup_env.sh               # provisions LLVM 17 + Python deps
 │   ├── generate_corpus.py         # build the joined training CSV
