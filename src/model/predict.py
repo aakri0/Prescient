@@ -21,9 +21,25 @@ from pathlib import Path
 import joblib
 import numpy as np
 
+import _render
+
 # A pass is recommended for skipping when its predicted cost exceeds this
 # many microseconds and the function is not already in the "high" tier.
 SKIP_COST_THRESHOLD_US = 1000.0
+
+# Columns shown in the IR-feature table — a readable subset covering all six
+# feature dimensions. (key, header, kind) where kind is "i" int or "f" float.
+FEATURE_VIEW = [
+    ("instruction_count",          "Insts",  "i"),
+    ("basic_block_count",          "BBs",    "i"),
+    ("cyclomatic_complexity",      "Cyclo",  "i"),
+    ("loop_count",                 "Loops",  "i"),
+    ("max_loop_depth",             "Depth",  "i"),
+    ("phi_node_count",             "PHIs",   "i"),
+    ("total_memory_ops",           "MemOps", "i"),
+    ("alias_proxy_density",        "AliasD", "f"),
+    ("type_complexity_normalized", "TypeCx", "f"),
+]
 
 # Models predict in log1p space. Clip the log-space prediction before expm1
 # so an extrapolating linear model cannot emit an absurd microsecond value.
@@ -128,6 +144,62 @@ def predict_one(func: dict, features: list[str], scaler, total_model,
     }
 
 
+def print_feature_table(functions: list[dict]) -> None:
+    """Show the extracted IR-complexity features as a table."""
+    headers = ["Function"] + [h for _, h, _ in FEATURE_VIEW]
+    aligns = ["<"] + [">"] * len(FEATURE_VIEW)
+    rows = []
+    for f in functions:
+        row = [f.get("function_name", "?")]
+        for key, _, kind in FEATURE_VIEW:
+            v = f.get(key, 0) or 0
+            row.append(f"{float(v):.2f}" if kind == "f" else f"{int(v):d}")
+        rows.append(row)
+    print(_render.banner(f"IR COMPLEXITY FEATURES  ({len(functions)} function(s))"))
+    print(_render.render_table(headers, rows, aligns))
+
+
+def print_prediction_tables(predictions: list[dict],
+                            output_path: Path) -> None:
+    """Show compile-time predictions and per-pass costs as tables."""
+    # --- headline predictions --------------------------------------------
+    headers = ["Function", "Tier", "Pred (us)", "Pred (ms)", "Confidence"]
+    aligns = ["<", "<", ">", ">", "<"]
+    rows = [[p["function_name"], p["complexity_tier"],
+             f'{p["predicted_total_us"]:,}',
+             f'{p["predicted_total_ms"]:.2f}',
+             p["confidence"]] for p in predictions]
+    print(_render.banner("COMPILE-TIME PREDICTIONS"))
+    print(_render.render_table(headers, rows, aligns))
+
+    # --- predicted per-pass cost -----------------------------------------
+    pass_names = sorted({pp["pass_name"]
+                         for p in predictions
+                         for pp in p["expensive_passes"]})
+    if pass_names:
+        headers = ["Function"] + pass_names
+        aligns = ["<"] + [">"] * len(pass_names)
+        rows = []
+        for p in predictions:
+            by_pass = {pp["pass_name"]: pp["predicted_us"]
+                       for pp in p["expensive_passes"]}
+            rows.append([p["function_name"]]
+                        + [f'{by_pass.get(n, 0):,}' for n in pass_names])
+        print(_render.banner("PREDICTED PER-PASS COST  (microseconds)"))
+        print(_render.render_table(headers, rows, aligns))
+
+    # --- summary ---------------------------------------------------------
+    tiers = {t: sum(1 for p in predictions if p["complexity_tier"] == t)
+             for t in ("low", "medium", "high")}
+    n_skip = sum(1 for p in predictions if p["skip_recommendation"])
+    print()
+    print(f"  Tier summary : low={tiers['low']}  medium={tiers['medium']}  "
+          f"high={tiers['high']}   (of {len(predictions)} function(s))")
+    print(f"  Skip advice  : {n_skip} function(s) have pass(es) worth skipping")
+    print(f"  JSON output  : {output_path}  (full detail, machine-readable)")
+    print()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Predict per-function compile time from IR features.")
@@ -194,10 +266,9 @@ def main() -> int:
     with output_path.open("w") as fh:
         json.dump(predictions, fh, indent=2)
 
-    tiers = {t: sum(1 for p in predictions if p["complexity_tier"] == t)
-             for t in ("low", "medium", "high")}
-    log(f"wrote {len(predictions)} prediction(s) to {output_path} "
-        f"(low={tiers['low']}, medium={tiers['medium']}, high={tiers['high']})")
+    # Human-readable tables (the JSON file above keeps the full detail).
+    print_feature_table(functions)
+    print_prediction_tables(predictions, output_path)
     return 0
 
 

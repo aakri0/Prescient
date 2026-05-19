@@ -36,6 +36,8 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 
+import _render
+
 # Feature columns (X) — the exact set and order is recorded in
 # training_metadata.json and must be reused verbatim by predict.py.
 FEATURE_COLUMNS = [
@@ -134,13 +136,18 @@ def cross_validate(X: np.ndarray, y: np.ndarray, n_splits: int) -> dict:
 
 
 def print_cv_table(cv: dict) -> None:
-    log(f"5-fold cross-validation on '{PRIMARY_TARGET}' "
-        f"(R2 on log1p scale, MAE/MAPE on microsecond scale):")
-    header = f"  {'Model':<20}{'R2':>10}{'MAE (us)':>14}{'MAPE (%)':>12}"
-    print(header)
-    print("  " + "-" * (len(header) - 2))
-    for name, s in cv.items():
-        print(f"  {name:<20}{s['r2']:>10.4f}{s['mae']:>14.1f}{s['mape']:>12.1f}")
+    """Print the cross-validation comparison as a table, marking the best."""
+    print(_render.banner("MODEL COMPARISON  (5-fold cross-validation)"))
+    print("  R2 is on the log1p scale; MAE and MAPE are on the microsecond")
+    print("  scale. Higher R2 is better; lower MAE and MAPE are better.")
+    print()
+    best = max(cv, key=lambda m: cv[m]["r2"])
+    headers = ["Model", "R2", "MAE (us)", "MAPE (%)", ""]
+    aligns = ["<", ">", ">", ">", "<"]
+    rows = [[name, f'{s["r2"]:.4f}', f'{s["mae"]:,.1f}', f'{s["mape"]:.1f}',
+             "<- best R2" if name == best else ""]
+            for name, s in cv.items()]
+    print(_render.render_table(headers, rows, aligns))
 
 
 def fit_and_save(model, X_scaled: np.ndarray, y: np.ndarray, path: Path) -> None:
@@ -171,7 +178,6 @@ def main() -> int:
         return 1
 
     df = pd.read_csv(data_path)
-    log(f"loaded {len(df)} rows from {data_path}")
 
     missing = [c for c in FEATURE_COLUMNS + [PRIMARY_TARGET] if c not in df.columns]
     if missing:
@@ -182,8 +188,17 @@ def main() -> int:
     before = len(df)
     df = df.dropna(subset=FEATURE_COLUMNS + [PRIMARY_TARGET]).reset_index(drop=True)
     dropped = before - len(df)
-    if dropped:
-        log(f"dropped {dropped} row(s) containing NaN values")
+
+    print(_render.banner("TRAINING DATA"))
+    print(_render.render_table(
+        ["Property", "Value"],
+        [["source CSV", str(data_path)],
+         ["rows loaded", str(before)],
+         ["rows dropped (NaN)", str(dropped)],
+         ["usable rows", str(len(df))],
+         ["feature columns", str(len(FEATURE_COLUMNS))],
+         ["primary target", PRIMARY_TARGET]],
+        ["<", "<"]))
 
     if len(df) < 10:
         log(f"WARNING: only {len(df)} usable rows — results will be unreliable "
@@ -219,7 +234,6 @@ def main() -> int:
     }
     for key, (fname, model) in primary_model_files.items():
         fit_and_save(model, X_scaled, y, models_dir / fname)
-    log(f"saved 3 primary-target models to {models_dir}/")
 
     # --- per-pass LinearRegression models ---------------------------------
     per_pass_files: dict[str, str] = {}
@@ -233,7 +247,6 @@ def main() -> int:
         fname = f"per_pass_{pass_name}_linear.joblib"
         fit_and_save(LinearRegression(), X_scaled, y_pass, models_dir / fname)
         per_pass_files[target] = fname
-    log(f"saved {len(per_pass_files)} per-pass models to {models_dir}/")
 
     # --- training metadata ------------------------------------------------
     metadata = {
@@ -255,7 +268,23 @@ def main() -> int:
     }
     with (models_dir / "training_metadata.json").open("w") as fh:
         json.dump(metadata, fh, indent=2)
-    log(f"wrote {models_dir}/training_metadata.json")
+
+    # --- saved-artifacts summary -----------------------------------------
+    artifact_rows = [
+        ["Feature scaler", f"{models_dir}/feature_scaler.joblib"],
+        ["Total-time model (LinearRegression)",
+         f"{models_dir}/total_time_linear.joblib"],
+        ["Total-time model (Ridge)", f"{models_dir}/total_time_ridge.joblib"],
+        ["Total-time model (RandomForest)",
+         f"{models_dir}/total_time_rf.joblib"],
+    ]
+    for target, fname in per_pass_files.items():
+        artifact_rows.append([f"Per-pass model ({target[len('time_'):]})",
+                              f"{models_dir}/{fname}"])
+    artifact_rows.append(["Training metadata",
+                          f"{models_dir}/training_metadata.json"])
+    print(_render.banner("SAVED ARTIFACTS"))
+    print(_render.render_table(["Artifact", "File"], artifact_rows, ["<", "<"]))
 
     # --- feature-importance report (issue #19) ----------------------------
     if not args.no_report:
