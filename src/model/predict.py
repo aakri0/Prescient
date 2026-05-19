@@ -22,24 +22,11 @@ import joblib
 import numpy as np
 
 import _render
+import show_features
 
 # A pass is recommended for skipping when its predicted cost exceeds this
 # many microseconds and the function is not already in the "high" tier.
 SKIP_COST_THRESHOLD_US = 1000.0
-
-# Columns shown in the IR-feature table — a readable subset covering all six
-# feature dimensions. (key, header, kind) where kind is "i" int or "f" float.
-FEATURE_VIEW = [
-    ("instruction_count",          "Insts",  "i"),
-    ("basic_block_count",          "BBs",    "i"),
-    ("cyclomatic_complexity",      "Cyclo",  "i"),
-    ("loop_count",                 "Loops",  "i"),
-    ("max_loop_depth",             "Depth",  "i"),
-    ("phi_node_count",             "PHIs",   "i"),
-    ("total_memory_ops",           "MemOps", "i"),
-    ("alias_proxy_density",        "AliasD", "f"),
-    ("type_complexity_normalized", "TypeCx", "f"),
-]
 
 # Models predict in log1p space. Clip the log-space prediction before expm1
 # so an extrapolating linear model cannot emit an absurd microsecond value.
@@ -142,21 +129,6 @@ def predict_one(func: dict, features: list[str], scaler, total_model,
         "skip_recommendation": skip,
         "confidence": confidence_from_scaled(scaled),
     }
-
-
-def print_feature_table(functions: list[dict]) -> None:
-    """Show the extracted IR-complexity features as a table."""
-    headers = ["Function"] + [h for _, h, _ in FEATURE_VIEW]
-    aligns = ["<"] + [">"] * len(FEATURE_VIEW)
-    rows = []
-    for f in functions:
-        row = [f.get("function_name", "?")]
-        for key, _, kind in FEATURE_VIEW:
-            v = f.get(key, 0) or 0
-            row.append(f"{float(v):.2f}" if kind == "f" else f"{int(v):d}")
-        rows.append(row)
-    print(_render.banner(f"IR COMPLEXITY FEATURES  ({len(functions)} function(s))"))
-    print(_render.render_table(headers, rows, aligns))
 
 
 def print_prediction_tables(predictions: list[dict],
@@ -267,7 +239,7 @@ def main() -> int:
         json.dump(predictions, fh, indent=2)
 
     # Human-readable tables (the JSON file above keeps the full detail).
-    print_feature_table(functions)
+    show_features.print_feature_table(functions)
     print_prediction_tables(predictions, output_path)
     return 0
 

@@ -47,8 +47,11 @@ require_models() {
 }
 
 # Extract IR-complexity features from a C file into output/features.json.
+# A second argument of "quiet" suppresses the feature table — used by
+# mode_predict, whose own output already prints the feature table.
 mode_extract() {
   local src="${1:-}"
+  local quiet="${2:-}"
   if [[ -z "$src" ]]; then err "extract requires a C source file"; usage; exit 1; fi
   [[ -f "$src" ]] || { err "no such file: $src"; exit 1; }
   [[ -n "$CLANG_BIN" ]] || { err "clang not found — run scripts/setup_env.sh"; exit 1; }
@@ -59,9 +62,21 @@ mode_extract() {
   local json="$OUTPUT_DIR/features.json"
   "$CLANG_BIN" -O0 -Xclang -disable-O0-optnone -emit-llvm -S "$src" -o "$ll" \
     || { err "clang failed to emit IR for $src"; exit 1; }
-  "$OPT_BIN" -load-pass-plugin "./$PLUGIN" -passes="ir-complexity" \
-    -complexity-output="$json" -disable-output "$ll" \
-    || { err "feature extraction pass failed"; exit 1; }
+
+  # The pass prints one progress line per function to stderr; capture it so
+  # a clean run shows only the feature table, and surface it on failure.
+  local optlog
+  if ! optlog="$("$OPT_BIN" -load-pass-plugin "./$PLUGIN" -passes="ir-complexity" \
+      -complexity-output="$json" -disable-output "$ll" 2>&1)"; then
+    err "feature extraction pass failed"
+    [[ -n "$optlog" ]] && printf '%s\n' "$optlog" >&2
+    exit 1
+  fi
+
+  # Show the extracted features as a readable table (needs python3).
+  if [[ "$quiet" != "quiet" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 "$ROOT_DIR/src/model/show_features.py" "$json" || true
+  fi
   ok "extract: features written to $json"
 }
 
@@ -83,7 +98,7 @@ mode_predict() {
   local src="${1:-}"
   if [[ -z "$src" ]]; then err "predict requires a C source file"; usage; exit 1; fi
   require_models
-  mode_extract "$src"
+  mode_extract "$src" quiet
   python3 src/model/predict.py \
     --features "$OUTPUT_DIR/features.json" --models-dir models \
     --output "$OUTPUT_DIR/predictions.json" \

@@ -141,28 +141,41 @@ docker compose run --rm prescient evaluate  # full evaluation suite
 
 ## Usage
 
-Extract features from a C file:
+Extract features from a C file — `extract` prints a readable table and
+writes the full detail to `output/features.json`:
 
 ```bash
-$ ./run.sh extract testcases/training/t02_nested_loops.c
-[IRComplexity] Analyzing function: matmul_3x3
+$ ./run.sh extract testcases/sample_math.c
+```
+
+```
+==============================================================================
+  IR COMPLEXITY FEATURES  (14 function(s))
+==============================================================================
+  Function     Insts   BBs   Cyclo   Loops   Depth   PHIs   MemOps   AliasD   TypeCx
+  ---------------------------------------------------------------------------------
+  add              8     1       1       0       0      0        4     0.50     2.38
+  power           25     5       2       1       1      0       12     0.48     2.44
+  is_prime        33    10       4       1       1      0       14     0.42     2.55
+  ...
 extract: features written to output/features.json
 ```
 
-Excerpt of `output/features.json`:
+`output/features.json` holds the complete 23-field record per function
+(the table above shows a readable subset):
 
 ```json
 [
   {
-    "function_name": "matmul_3x3",
-    "instruction_count": 92,
-    "basic_block_count": 11,
-    "cyclomatic_complexity": 6,
-    "max_loop_depth": 3,
-    "loop_instruction_ratio": 0.8478,
-    "phi_density": 0.0978,
-    "type_complexity_normalized": 1.4239,
-    "alias_proxy_density": 0.3261
+    "function_name": "is_prime",
+    "instruction_count": 33,
+    "basic_block_count": 10,
+    "cyclomatic_complexity": 4,
+    "max_loop_depth": 1,
+    "loop_instruction_ratio": 0.6970,
+    "phi_density": 0.0,
+    "type_complexity_normalized": 2.5455,
+    "alias_proxy_density": 0.4242
   }
 ]
 ```
