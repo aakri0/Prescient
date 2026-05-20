@@ -129,7 +129,8 @@ kbd {
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg-elev);
   min-height: 52px;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .panel-title {
   display: flex; align-items: center; gap: 9px;
@@ -206,18 +207,20 @@ kbd {
 .monaco-editor, .monaco-editor-background { background: var(--bg) !important; }
 
 /* ===== tabs ===== */
-.tabs { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border-soft); }
+.tabs { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border-soft); flex-shrink: 0; overflow-x: auto; }
 .tab {
   background: transparent;
   color: var(--text-dim);
   border: 0;
-  padding: 6px 12px;
+  padding: 6px 10px;
   border-radius: 5px;
   cursor: pointer;
-  font-family: inherit; font-size: 11px;
+  font-family: inherit; font-size: 10.5px;
   font-weight: 500;
-  text-transform: uppercase; letter-spacing: 1px;
+  text-transform: uppercase; letter-spacing: .8px;
   transition: color .12s, background-color .12s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .tab:hover  { color: var(--text); }
 .tab.active { color: var(--accent); background: rgba(56,189,248,.1); }
@@ -396,6 +399,91 @@ table.tbl tr:hover td { background: rgba(56,189,248,.05); }
   color: var(--accent);
 }
 
+/* ===== info quote block ===== */
+.info-quote {
+  background: var(--bg-elev);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+.info-quote strong { color: var(--text); }
+.info-quote em     { color: var(--accent); font-style: normal; }
+.info-quote b      { color: var(--text); }
+.pass-explain-list {
+  margin: 8px 0 0 0;
+  padding-left: 18px;
+  list-style: none;
+}
+.pass-explain-list li {
+  position: relative;
+  padding-left: 6px;
+  margin-bottom: 5px;
+}
+.pass-explain-list li::before {
+  content: '·';
+  position: absolute;
+  left: -10px;
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+/* ===== badge (O0 / O2 labels) ===== */
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+.badge, .badge-o0 {
+  background: rgba(56,189,248,.15);
+  color: var(--accent);
+}
+.badge-o2 {
+  background: rgba(52,211,153,.15);
+  color: var(--green);
+}
+
+/* ===== comparison deltas ===== */
+.compare-vals {
+  display: block;
+  font-size: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.compare-delta {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  margin-top: 1px;
+}
+.delta-down { color: var(--green); }
+.delta-up   { color: var(--red); }
+.delta-zero { color: var(--text-faint); }
+.compare-hdr { display: block; }
+.compare-sub {
+  display: block;
+  font-size: 9.5px;
+  color: var(--text-faint);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-top: 1px;
+}
+
+/* ===== per-pass heat ===== */
+td.hot  { color: var(--red) !important; font-weight: 600; }
+td.warm { color: var(--amber) !important; }
+
 /* ===== scrollbars ===== */
 .results::-webkit-scrollbar { width: 10px; height: 10px; }
 .results::-webkit-scrollbar-track { background: transparent; }
@@ -415,4 +503,5 @@ table.tbl tr:hover td { background: rgba(56,189,248,.05); }
   .editor-panel { border-right: 0; border-bottom: 1px solid var(--border); }
   .brand-text p { display: none; }
   .panel-actions .select:nth-child(2) { display: none; } /* hide sample dropdown on phones */
+  .results-panel > .panel-header > .panel-title { display: none; } /* give tabs full width */
 }
