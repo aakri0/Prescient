@@ -1,7 +1,8 @@
 # Convenience wrapper around the Docker image.
-#   docker compose build              # build the image
+#   docker compose build                       # build the image
 #   docker compose run --rm prescient extract testcases/training/x.c
 #   docker compose run --rm prescient --help
+#   docker compose up frontend                  # web UI on http://localhost:8080
 #
 # Manual (non-Docker) usage is unchanged: scripts/setup_env.sh, ./build.sh,
 # ./run.sh on an Ubuntu 22.04 host.
@@ -18,3 +19,22 @@ services:
       # `evaluate`/`predict` can be invoked as separate `docker compose run`
       # commands.
       - ./models:/opt/prescient/models
+
+  # Web frontend — Monaco editor + Flask backend that drives the pipeline.
+  # Open http://localhost:8080 once it's up.
+  frontend:
+    build: .
+    image: prescient:latest
+    # Override the image's ENTRYPOINT (./run.sh) so we run the Flask server.
+    entrypoint: ["python3", "frontend/server.py"]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8080
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount frontend/ so HTML/CSS/JS edits are live without rebuilding.
+      - ./frontend:/opt/prescient/frontend:ro
+      - ./models:/opt/prescient/models
+      - ./output:/opt/prescient/output
+      - ./testcases:/opt/prescient/testcases:ro

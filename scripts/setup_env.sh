@@ -61,10 +61,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQ_FILE="${SCRIPT_DIR}/../requirements.txt"
 if [[ -f "$REQ_FILE" ]]; then
   python3 -m pip install --upgrade pip
-  python3 -m pip install -r "$REQ_FILE"
+  # --ignore-installed avoids "uninstall-distutils-installed-package" conflicts
+  # when pip wants to upgrade an apt-managed Python package (Ubuntu's
+  # blinker / pyparsing / etc. are distutils-installed by apt).
+  python3 -m pip install --ignore-installed -r "$REQ_FILE"
 else
   python3 -m pip install --upgrade pip
-  python3 -m pip install scikit-learn pandas numpy joblib matplotlib seaborn
+  python3 -m pip install --ignore-installed scikit-learn pandas numpy joblib matplotlib seaborn
 fi
 
 # --- symlinks so unsuffixed tool names resolve to v17 ---------------------

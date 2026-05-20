@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prescient — LLVM Compile-Time Predictor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">⌬</div>
+      <div class="brand-text">
+        <h1>Prescient</h1>
+        <p>LLVM 17 · pre-pipeline compile-time predictor</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div id="health" class="health">checking…</div>
+      <div id="status" class="status">Ready</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel editor-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="dot"></span>
+          <span>Source</span>
+        </div>
+        <div class="panel-actions">
+          <select id="lang" class="select" title="Source language">
+            <option value="c">C</option>
+            <option value="cpp">C++</option>
+          </select>
+          <select id="sample" class="select" title="Load a built-in sample">
+            <option value="">Load sample…</option>
+            <option value="simple">Simple — add</option>
+            <option value="branchy">Branchy — classify</option>
+            <option value="nested">Loops — triple nest</option>
+            <option value="memory">Memory — blur</option>
+            <option value="types">Types — nested structs</option>
+            <option value="failure">Failure case — misleading</option>
+          </select>
+          <button id="analyze" class="btn-primary" title="Analyze (⌘/Ctrl+Enter)">
+            <span class="btn-icon">▶</span><span>Analyze</span>
+          </button>
+        </div>
+      </div>
+      <div id="editor" class="editor"></div>
+      <div class="panel-footer">
+        <span>Shortcut: <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+        <span id="size-hint">—</span>
+      </div>
+    </section>
+
+    <section class="panel results-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="dot accent"></span>
+          <span>Analysis</span>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="features">Features</button>
+          <button class="tab" data-tab="predictions">Predictions</button>
+          <button class="tab" data-tab="passes">Per-pass</button>
+        </div>
+      </div>
+      <div class="results" id="results">
+        <div class="empty">
+          <div class="empty-icon">⌬</div>
+          <p class="empty-title">Write C / C++ code on the left and click <b>Analyze</b>.</p>
+          <p class="empty-sub">Or pick a sample from the dropdown above.</p>
+          <p class="empty-shortcut"><kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd> runs the analysis.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

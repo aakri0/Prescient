@@ -139,6 +139,29 @@ docker compose run --rm prescient evaluate  # full evaluation suite
 > The first `docker compose build` takes a few minutes — it installs the
 > LLVM 17 toolchain into the image. Subsequent runs are cached.
 
+## Web Frontend
+
+A polished web UI is bundled — a Monaco-based code editor (the same
+editor VS Code uses) on the left and a live analysis panel on the right,
+with tabs for the IR feature table, compile-time predictions and
+predicted per-pass cost.
+
+```bash
+docker compose up frontend            # open http://localhost:8080
+```
+
+Native (Linux):
+
+```bash
+pip install -r requirements.txt
+python3 frontend/server.py            # open http://localhost:8080
+```
+
+Six built-in samples are available from the dropdown (simple add,
+branchy classify, triple-nested loops, memory-heavy blur, nested
+structs, and the documented failure case). `⌘/Ctrl + Enter` runs the
+analysis. See [frontend/](frontend/) for the code.
+
 ## Usage
 
 Extract features from a C file — `extract` prints a readable table and
@@ -289,6 +312,11 @@ Caveats worth knowing:
 │       ├── predict.py             # CLI: features.json → predictions.json
 │       ├── feature_importance.py  # docs/feature_importance_report.md + plots
 │       └── _render.py             # shared terminal-table helper
+├── frontend/                      # web UI (Monaco editor + Flask backend)
+│   ├── server.py                  # /api/analyze drives the existing pipeline
+│   ├── index.html
+│   ├── style.css                  # professional dark theme
+│   └── app.js                     # editor + render logic
 ├── scripts/
 │   ├── setup_env.sh               # provisions LLVM 17 + Python deps
 │   ├── generate_corpus.py         # build the joined training CSV

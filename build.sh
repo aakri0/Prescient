@@ -40,7 +40,7 @@ ARTIFACT="build/IRComplexityEstimator.so"
 [[ -f "$ARTIFACT" ]] || die "$ARTIFACT was not produced"
 
 # --- python deps ----------------------------------------------------------
-python3 -m pip install -r requirements.txt >/dev/null 2>&1 \
+python3 -m pip install --ignore-installed -r requirements.txt >/dev/null 2>&1 \
   || die "pip install -r requirements.txt failed"
 
 echo -e "${GREEN}BUILD SUCCESSFUL${NC}: $ARTIFACT"
