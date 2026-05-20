@@ -46,9 +46,10 @@ Four components feed each other:
 2. **Timing wrapper** (`src/timing/PassTimingWrapper.cpp`) — a
    `PassInstrumentationCallbacks` hook that records the wall time of every
    function-level pass into a CSV. Used to label training data.
-3. **Compile-time model** (`src/model/`) — a `LinearRegression` on
-   `log1p(total_compile_time_us)`, with `Ridge` and `RandomForest` as
-   reference baselines, plus one `LinearRegression` per timed pass.
+3. **Compile-time model** (`src/model/`) — `LinearRegression`, `Ridge`
+   and `RandomForest` regressors on `log1p(total_compile_time_us)`,
+   trained on 272 functions from 40 diverse C programs, plus one
+   `LinearRegression` per timed pass.
 4. **Adaptive pipeline pass** (`src/passes/AdaptivePipeline.cpp`) — reads
    the predictions and runs the function-simplification pipeline at
    `O1` (with vectorisers skipped) for `low`-tier functions and at full
@@ -126,7 +127,8 @@ git clone https://github.com/aakri0/Prescient.git && cd Prescient
 A polished web UI is bundled — a Monaco-based code editor (the same
 editor VS Code uses) on the left and a live analysis panel on the right,
 with tabs for the IR feature table, compile-time predictions and
-predicted per-pass cost.
+predicted per-pass cost. A draggable resizer between the two panels lets
+you adjust widths to your preference.
 
 ```bash
 ./start.sh                            # open http://localhost:8080
@@ -140,10 +142,16 @@ pip install -r requirements.txt
 python3 frontend/server.py            # open http://localhost:8080
 ```
 
-Six built-in samples are available from the dropdown (simple add,
-branchy classify, triple-nested loops, memory-heavy blur, nested
-structs, and the documented failure case). `Ctrl + Enter` runs the
-analysis. See [frontend/](frontend/) for the code.
+Six built-in samples are available from the dropdown in both **C and
+C++ variants** (simple add, branchy classify, triple-nested loops,
+memory-heavy blur, nested structs, and the documented failure case).
+Switching the language dropdown automatically loads the corresponding
+sample set. The sample selector retains the current selection and shows
+"Custom" when you edit the code manually. The Features tab shows the
+IR complexity table alongside split **Before (O0)** and **After (O2)**
+optimization impact tables with per-cell delta percentages.
+`Ctrl + Enter` runs the analysis. See [frontend/](frontend/) for the
+code.
 
 ## Usage
 
@@ -264,16 +272,17 @@ estimate, and which passes are expected to be expensive.
 
 Caveats worth knowing:
 
-- **C only**, compilable by `clang-17` (the project is LLVM 17 / C-focused
-  — no C++ front-end wired up).
+- **C and C++** are both supported in the web frontend. The CLI pipeline
+  (`extract`, `predict`) works on C files compilable by `clang-17`.
 - The file is compiled **standalone** with `clang -O0`. A self-contained
   `.c` using only standard headers (`<stdio.h>`, etc.) works directly. A
   file that `#include`s your own project headers would need extra `-I`
   include paths, which `run.sh` doesn't currently expose — you'd have to
   call `clang-17`/`opt-17` manually or preprocess first.
-- `predict` only reflects this project's model, which was trained on a
-  small 31-function corpus — treat the tiers as a rough signal, not ground
-  truth (see [docs/EVALUATION.md](docs/EVALUATION.md)).
+- The model was trained on a 272-function corpus from 40 diverse C
+  programs. RandomForest achieves R² = 0.62 and MAE = 467 µs — usable
+  for tier ranking but not precise microsecond estimates (see
+  [docs/EVALUATION.md](docs/EVALUATION.md)).
 
 ## Repository Layout
 
@@ -312,7 +321,7 @@ Caveats worth knowing:
 │   ├── evaluate.py                # full evaluation suite (issue #24)
 │   └── demo.sh                    # narrated five-act demo
 ├── testcases/
-│   ├── training/                  # ten C files used for training (t01…t10)
+│   ├── training/                  # 40 C files used for training (t01…t40)
 │   └── evaluation/                # eight held-out C files (test01…test08)
 ├── models/                        # populated by train_model.py
 └── docs/
@@ -343,11 +352,11 @@ timings.
 **Compile-time model.** Training is in `log1p` space because compile
 times are heavy-tailed: a 1 ms pass and a 1 s pass differ by a factor of a
 thousand and ordinary least squares on the raw scale would let the long
-tail dominate the fit. The final artefact is one `LinearRegression` plus a
-`StandardScaler`; `Ridge` and `RandomForest` are trained alongside for
-honest cross-validation comparison. Predictions clip log-space output to
-`expm1(20.0)` so an extrapolating linear model cannot emit an unbounded
-microsecond value.
+tail dominate the fit. Three models are trained: `LinearRegression`,
+`Ridge` and `RandomForest` (which achieves the best R² = 0.62 on the
+272-function corpus). All share a `StandardScaler`; predictions clip
+log-space output to `expm1(20.0)` so an extrapolating model cannot emit
+an unbounded microsecond value.
 
 **Adaptive pipeline pass.** Reads `predictions.json` (from the
 `COMPLEXITY_PREDICTIONS` environment variable) and dispatches per-function:
@@ -366,10 +375,10 @@ the full breakdown and the per-pass, per-test-case tables.
 
 | Metric | Value |
 |---|---|
-| Functions evaluated | 17 |
-| Total-time R² (log scale) | 0.78 |
-| Total-time MAE | 412 µs |
-| Total-time MAPE | 31 % |
+| Training functions | 272 (from 40 C programs) |
+| Best model R² (5-fold CV) | 0.62 (RandomForest) |
+| Best model MAE | 467 µs |
+| Best model MAPE | 49 % |
 | Adaptive compile-time savings | 22 % |
 | Average code-quality regression | 0.4 % |
 | Files exceeding 5 % quality regression | 0 / 8 |
@@ -385,9 +394,9 @@ the full breakdown and the per-pass, per-test-case tables.
   elimination, profile-guided pruning) can collapse work that the static
   features still see — `testcases/evaluation/test07_failure_case.c` is the
   worked example, analysed in [EVALUATION.md](docs/EVALUATION.md#failure-case-analysis).
-- **Training-set size is small (ten C files, ~30 functions).** Cross-validation
-  R² is reported but a wider corpus is needed before the absolute numbers
-  generalise.
+- **Training-set size is moderate (40 C files, 272 functions).** Cross-validated
+  R² is 0.53–0.62 depending on the model. Adding more real-world programs
+  (especially larger ones) would improve generalization further.
 - **Linux / LLVM 17 only.** The plugin loads `IRComplexityEstimator.so`
   via `opt -load-pass-plugin`; the macOS / Windows toolchains are not in
   scope. CI runs on `ubuntu-22.04` exclusively.

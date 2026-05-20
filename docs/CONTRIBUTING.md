@@ -247,12 +247,13 @@ are allowed.
 The training files do not need a `main` — they are compiled to IR and
 then handed to opt, not linked into a binary.
 
-> **Minimum recommended corpus size: 30 functions across at least 5
-> distinct complexity patterns.** Anything smaller will fail the
-> in-script `R² > 0.5` guard in cross-validation (which fires a
-> warning, not an error). The ten existing training files cover ten
-> complexity patterns — see [DESIGN.md §2](DESIGN.md#2-feature-selection-rationale)
-> for what each pattern is meant to exercise.
+> **Minimum recommended corpus size: 100 functions across at least 15
+> distinct complexity patterns.** Anything smaller risks falling below
+> the in-script `R² > 0.5` guard in cross-validation (which fires a
+> warning, not an error). The forty existing training files cover
+> roughly forty complexity patterns and produce 272 functions — see
+> [DESIGN.md §2](DESIGN.md#2-feature-selection-rationale) for what each
+> pattern is meant to exercise.
 
 **Step 2 — regenerate the corpus CSV.**
 

@@ -10,15 +10,22 @@ reproduced verbatim from that JSON.
 
 ## 1. Methodology
 
-**Training corpus.** Ten C source files in
+**Training corpus.** Forty C source files in
 [testcases/training/](../testcases/training) (`t01_simple_leaf.c` …
-`t10_pathological.c`) covering ten complexity patterns: simple leaves,
-nested loops, aliasing, branching, type complexity, PHI-heavy regions,
-large straight-line code, recursion, SIMD-friendly loops and a
-pathological case. After
+`t40_heavy_compute.c`) covering a wide range of complexity patterns:
+simple leaves, nested loops, aliasing, branching, type complexity,
+PHI-heavy regions, large straight-line code, recursion, SIMD-friendly
+loops, pathological cases, string operations, sorting algorithms, matrix
+operations, bitwise manipulation, linked lists, hash tables, numerical
+methods, crypto hashing, graph algorithms, signal processing, state
+machines, binary trees, compression, image processing, dynamic
+programming, array search, heap operations, vector math, scheduling,
+arena allocation, physics simulation, bytecode interpretation, geometry,
+trivial leaf functions, deep nesting, complex structs, pattern matching,
+ring buffers, statistics and heavy compute. After
 [generate_corpus.py](../scripts/generate_corpus.py) compiles each file
 to unoptimised IR, extracts features and times every per-function pass
-under `default<O2>`, the joined corpus contains **31 functions**.
+under `default<O2>`, the joined corpus contains **272 functions**.
 
 **Test corpus.** Eight independent C source files in
 [testcases/evaluation/](../testcases/evaluation) (`test01_arith_eval.c`
@@ -31,12 +38,12 @@ unit and therefore share clang's `-O0` IR-emission idiosyncrasies, so
 splitting by file is the only way to keep the test set genuinely held
 out.
 
-**Split rationale.** A 30 / 17 split is small in absolute terms; the
-ratio is unusual because the project deliberately favours *coverage of
-complexity patterns* over raw row count. With ten training patterns
-each producing two or three functions, a 5-fold CV on the training set
-gives ~6 functions per fold — small but enough to detect catastrophic
-overfit, which the comparison table in §2 does.
+**Split rationale.** A 272 / 17 split puts the bulk of the data in
+training, which is standard for a corpus this size. The forty training
+files cover roughly forty distinct complexity patterns, each producing
+between two and twenty functions. A 5-fold CV on the training set gives
+~54 functions per fold — large enough to detect both catastrophic overfit
+and systematic under-prediction, which the comparison table in §2 does.
 
 ## 2. Prediction accuracy
 
@@ -47,17 +54,16 @@ interpretability.
 
 | Model | R² (log scale) | MAE (µs) | MAPE (%) | RMSE (µs) |
 |---|---:|---:|---:|---:|
-| **LinearRegression** | **0.78** | **412** | **31.4** | **863** |
-| Ridge (α = 1.0) | 0.77 | 418 | 31.8 | 871 |
-| RandomForest (100 trees) | 0.71 | 504 | 38.2 | 1042 |
+| **RandomForest (100 trees)** | **0.62** | **467** | **49.2** | **—** |
+| Ridge (α = 1.0) | 0.54 | 1 040 | 65.6 | — |
+| LinearRegression | 0.53 | 1 154 | 67.3 | — |
 
-LinearRegression wins on every metric. Ridge tracks it within noise
-(the α=1.0 penalty barely moves any coefficient at this corpus size).
-RandomForest underperforms because thirty rows is below the regime in
-which a hundred-tree ensemble generalises; the gap closes with more
-data, but at the cost of the interpretability that motivates the linear
-model in the first place
-([DESIGN.md §4](DESIGN.md#4-model-choice)).
+RandomForest now wins on every metric. With 272 training functions
+(up from 31) the ensemble has enough data to generalise without severe
+overfitting and substantially outperforms both linear models.
+LinearRegression remains the default for tier assignment because of its
+interpretability and microsecond-level inference cost — see
+[DESIGN.md §4](DESIGN.md#4-model-choice) for the full rationale.
 
 ![Predicted vs actual compile time](evaluation_plots/prediction_scatter.png)
 
@@ -167,10 +173,11 @@ through the exact computation.
 
 Two findings are demonstrated by the numbers above:
 
-1. **The static feature set captures most of the compile-time
-   variation.** R² of 0.78 in log space across an independent test
-   corpus, with no per-function tuning, says that twelve cheap
-   structural features explain most of what `default<O2>` does.
+1. **The static feature set captures meaningful compile-time
+   variation.** R² of 0.62 (RandomForest, best model) in log space
+   across 5-fold cross-validation on a 272-function corpus, with no
+   per-function tuning, says that twelve cheap structural features
+   explain a substantial share of what `default<O2>` does.
 2. **Tier-driven adaptation saves real time at near-zero quality
    cost.** 22 % compile-time savings with an average quality regression
    of 0.4 % and zero files exceeding 5 % — the safety margin from

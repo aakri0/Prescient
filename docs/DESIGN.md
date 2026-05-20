@@ -39,8 +39,8 @@ factor of ~10⁴ between the two. A linear model fit on raw microseconds
 would let the tail dominate every loss; a model fit on log1p microseconds
 is well-behaved but predictions have to be back-transformed safely. The
 modelling question is not "which fancy model" but "what is the smallest
-model that captures the heavy tail without overfitting a thirty-function
-corpus and stays interpretable enough to debug".
+model that captures the heavy tail without overfitting and stays
+interpretable enough to debug".
 
 **1d. Pipeline integration.** A prediction is only useful if it changes
 what the compiler does. The integration challenge is that LLVM's pass
@@ -142,14 +142,19 @@ one command.
 
 ## 4. Model choice
 
-The shipped model is `LinearRegression` on `log1p(total_compile_time_us)`
-with `StandardScaler`-normalised features. The next two were trained
-alongside as honest baselines and live in the same metadata file:
+Three models are trained on `log1p(total_compile_time_us)` with
+`StandardScaler`-normalised features: `LinearRegression`,
 `Ridge(alpha=1.0)` and `RandomForestRegressor(n_estimators=100)`. The
 cross-validation comparison is in
 [EVALUATION.md §2](EVALUATION.md#2-prediction-accuracy).
 
-**Why LinearRegression won.**
+**RandomForest is the most accurate model.** With 272 training functions
+from 40 diverse C programs, RandomForest achieves R² = 0.62, MAE = 467 µs
+and MAPE = 49 % — substantially better than LinearRegression (R² = 0.53,
+MAE = 1,154 µs) and Ridge (R² = 0.54, MAE = 1,040 µs). The corpus is
+now large enough for the ensemble to generalise without severe overfitting.
+
+**Why LinearRegression is still the default for tier assignment.**
 
 1. *Interpretability.* The trained model has twelve coefficients on
    standardised inputs, so their magnitudes are directly comparable and
@@ -157,26 +162,17 @@ cross-validation comparison is in
    `coef_`. The `predict.py` "tier rationale" line ("phi_density=0.18,
    instruction_count=412") falls out of the same coefficients —
    impossible with a random forest without SHAP or similar.
-2. *No overfitting on a tiny corpus.* Thirty training functions is far
-   below the regime in which a hundred-tree random forest generalises;
-   the RandomForest baseline overfits visibly (high train R², lower CV
-   R²) while the linear model does not.
-3. *Microsecond inference.* The whole pipeline must not itself become a
+2. *Microsecond inference.* The whole pipeline must not itself become a
    compile-time cost. A linear predict over twelve features is a
    handful of multiply-adds; loading and running the RandomForest is two
    orders of magnitude slower and dominates the time the prediction is
    trying to save on tiny functions.
 
-**Why we did not stay with Ridge.** Ridge regularisation produces almost
-identical coefficients to `LinearRegression` at this corpus size; the
-α=1.0 penalty barely moves any coefficient. Keeping it as a reference is
-useful (and we do); preferring it as the default is not.
-
-**Why we did not switch to RandomForest.** The CV R² of RandomForest is
-modestly higher on the *log1p* target (it can fit the heavy tail without
-the transform) but the gain disappears once the prediction is converted
-back to microseconds via `expm1`. The interpretability and inference-cost
-arguments above then dominate.
+**Why we keep all three.** Ridge serves as a regularised comparison,
+RandomForest gives the best point estimates for the web frontend's
+predictions, and LinearRegression provides the interpretable tier
+assignments and feature-importance coefficients. All three are shipped
+so users can compare.
 
 ## 5. Adaptive pipeline design — tiers, not budgets
 

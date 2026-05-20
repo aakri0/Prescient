@@ -112,7 +112,7 @@ kbd {
 .layout {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 6px minmax(0, 1fr);
   gap: 0;
   min-height: 0;
 }
@@ -121,7 +121,38 @@ kbd {
   min-width: 0; min-height: 0;
   background: var(--bg);
 }
-.editor-panel { border-right: 1px solid var(--border); }
+.editor-panel { border-right: none; }
+
+/* ===== resizer ===== */
+.resizer {
+  background: var(--border);
+  cursor: col-resize;
+  position: relative;
+  z-index: 10;
+  transition: background .15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.resizer:hover,
+.resizer.active {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.resizer::before {
+  content: '';
+  width: 2px;
+  height: 36px;
+  border-radius: 2px;
+  background: var(--text-faint);
+  opacity: 0;
+  transition: opacity .15s;
+}
+.resizer:hover::before,
+.resizer.active::before {
+  opacity: .7;
+  background: #fff;
+}
 
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -245,8 +276,20 @@ kbd {
 .empty-sub    { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
 .empty-shortcut { color: var(--text-faint); font-size: 12px; margin-top: 22px; }
 
+/* ===== section titles ===== */
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: .2px;
+}
+
 /* ===== summary cards ===== */
-.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 18px; }
 .summary-card {
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
@@ -258,26 +301,45 @@ kbd {
 .summary-card::before {
   content: '';
   position: absolute; left: 0; top: 0; bottom: 0;
-  width: 2px;
+  width: 3px;
   background: var(--accent);
-  opacity: .55;
+  opacity: .6;
+  border-radius: 0 2px 2px 0;
 }
 .summary-card .label {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  font-weight: 500;
+  letter-spacing: 1.2px;
+  font-weight: 600;
 }
 .summary-card .value {
   color: var(--text);
-  font-size: 24px;
-  font-weight: 600;
-  margin-top: 5px;
+  font-size: 26px;
+  font-weight: 700;
+  margin-top: 6px;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
-.summary-card .sub  { color: var(--text-faint); font-size: 12px; margin-top: 4px; }
+.summary-card .sub  { color: var(--text-faint); font-size: 11.5px; margin-top: 5px; line-height: 1.3; }
+
+/* optimization impact cards */
+.summary-card.opt-card::before {
+  background: var(--accent-2);
+  opacity: .7;
+}
+.summary-card.opt-card .value {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+.summary-card.opt-card .sub {
+  margin-top: 6px;
+}
+.summary-card.opt-card .sub .compare-delta {
+  font-size: 14px;
+  font-weight: 700;
+}
 
 /* ===== table ===== */
 .tbl-wrap {
@@ -286,6 +348,10 @@ kbd {
   overflow: hidden;
   background: var(--bg-elev);
   margin-bottom: 18px;
+}
+.tbl-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .tbl-title {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -479,6 +545,16 @@ table.tbl tr:hover td { background: rgba(56,189,248,.05); }
   letter-spacing: 0;
   margin-top: 1px;
 }
+.opt-value {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.opt-value + .compare-delta {
+  font-size: 10px;
+  margin-top: 2px;
+}
 
 /* ===== per-pass heat ===== */
 td.hot  { color: var(--red) !important; font-weight: 600; }
@@ -497,9 +573,10 @@ td.warm { color: var(--amber) !important; }
 /* ===== responsive ===== */
 @media (max-width: 960px) {
   .layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important; /* override JS inline style */
     grid-template-rows: minmax(280px, 1fr) 1fr;
   }
+  .resizer { display: none; }
   .editor-panel { border-right: 0; border-bottom: 1px solid var(--border); }
   .brand-text p { display: none; }
   .panel-actions .select:nth-child(2) { display: none; } /* hide sample dropdown on phones */

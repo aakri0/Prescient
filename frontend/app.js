@@ -3,7 +3,8 @@
  * POST /api/analyze runs the existing pipeline; we just render its JSON.
  */
 
-const SAMPLES = {
+/* ========== C Samples ========== */
+const SAMPLES_C = {
   simple: `#include <stdio.h>
 
 // Simplest possible function — the baseline.
@@ -111,6 +112,124 @@ int main(void) {
 `,
 };
 
+/* ========== C++ Samples ========== */
+const SAMPLES_CPP = {
+  simple: `#include <iostream>
+
+// Simplest possible function — the baseline.
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    std::cout << add(3, 4) << std::endl;
+    return 0;
+}
+`,
+  branchy: `#include <iostream>
+
+// Many "forks in the road" — Cyclo and BBs go up.
+int classify(int x) {
+    if (x < 0)         return -1;
+    else if (x == 0)   return 0;
+    else if (x < 10)   return 1;
+    else if (x < 100)  return 2;
+    else if (x < 1000) return 3;
+    else               return 4;
+}
+
+int main() {
+    std::cout << classify(42) << std::endl;
+    return 0;
+}
+`,
+  nested: `#include <iostream>
+
+// Three loops stacked — Loops=3, Depth=3.
+int triple_loop(int n) {
+    int total = 0;
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            for (int k = 0; k < n; k++)
+                total += i + j + k;
+    return total;
+}
+
+int main() {
+    std::cout << triple_loop(10) << std::endl;
+    return 0;
+}
+`,
+  memory: `#include <iostream>
+#include <cstring>
+#include <vector>
+
+// Many memory loads / stores through pointers.
+void blur(int *out, const int *in, int n) {
+    for (int i = 1; i < n - 1; i++)
+        out[i] = in[i - 1] + in[i] + in[i + 1];
+}
+
+int main() {
+    std::vector<int> a = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    std::vector<int> b(10, 0);
+    blur(b.data(), a.data(), 10);
+    std::cout << b[5] << std::endl;
+    return 0;
+}
+`,
+  types: `#include <iostream>
+
+// Data nested inside data — TypeCx goes up.
+struct Inner  { int *values; int count; };
+struct Middle { Inner items[4]; double scale; };
+struct Outer  { Middle layers[2]; Middle *active; };
+
+double type_heavy(const Outer *o) {
+    return o->active->scale + o->layers[0].scale;
+}
+
+int main() {
+    Middle m = { .scale = 3.14 };
+    Outer o = { .layers = { m, m }, .active = &m };
+    std::cout << type_heavy(&o) << std::endl;
+    return 0;
+}
+`,
+  failure: `#include <iostream>
+
+// Looks expensive (high Insts, depth 3) but compiles fast:
+// every value below is a constant, so InstCombine/SCCP fold it away
+// before the heavy passes ever see real work.
+int misleading(int n) {
+    int out = 0;
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            for (int k = 0; k < n; k++) {
+                int a = 42, b = a*2, c = b+a, d = c-b+a, e = d*2+c;
+                int f = e+d-a, g = f*3-e, h = g+f+e+d;
+                out += a + b + c + d + e + f + g + h;
+            }
+    return out;
+}
+
+int main() {
+    std::cout << misleading(5) << std::endl;
+    return 0;
+}
+`,
+};
+
+/* ========== Sample labels for dropdown ========== */
+const SAMPLE_LABELS = {
+  simple:  "Simple — add",
+  branchy: "Branchy — classify",
+  nested:  "Loops — triple nest",
+  memory:  "Memory — blur",
+  types:   "Types — nested structs",
+  failure: "Failure case — misleading",
+};
+
 const FEATURE_COLS = [
   ["instruction_count",          "Insts",  "int"],
   ["basic_block_count",          "BBs",    "int"],
@@ -123,7 +242,7 @@ const FEATURE_COLS = [
   ["type_complexity_normalized", "TypeCx", "float2"],
 ];
 
-/* Key features to highlight in the O0 → O2 comparison */
+/* Key features to highlight in the O0 vs O2 comparison */
 const COMPARE_COLS = [
   ["instruction_count",     "Instructions",  "int"],
   ["basic_block_count",     "Basic Blocks",  "int"],
@@ -137,6 +256,8 @@ let editor = null;
 let lastResult = null;
 let modelMetrics = null;     /* loaded once from /api/health */
 let activeTab = "features";
+let currentSample = "simple";
+let settingSample = false;
 
 const $  = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({
@@ -147,6 +268,27 @@ const fmtNum = (v, kind) => kind === "float2"
   : Number(Math.trunc(Number(v || 0))).toLocaleString();
 const fmtInt = (n) => Number(n || 0).toLocaleString();
 const dispName = (f) => f.display_name || f.function_name || "?";
+const getSamples = () => $("lang").value === "cpp" ? SAMPLES_CPP : SAMPLES_C;
+
+/* ---------- sample dropdown ---------- */
+function populateSamples() {
+  const sel = $("sample");
+  sel.innerHTML = "";
+  /* "Custom" option — only visible when user has edited */
+  const customOpt = document.createElement("option");
+  customOpt.value = "custom";
+  customOpt.textContent = "Custom";
+  if (currentSample !== "custom") customOpt.hidden = true;
+  sel.appendChild(customOpt);
+  /* sample options */
+  for (const [key, label] of Object.entries(SAMPLE_LABELS)) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  sel.value = currentSample;
+}
 
 /* ---------- Monaco bootstrap ---------- */
 require.config({
@@ -154,7 +296,7 @@ require.config({
 });
 require(["vs/editor/editor.main"], function () {
   editor = monaco.editor.create($("editor"), {
-    value: SAMPLES.simple,
+    value: SAMPLES_C.simple,
     language: "c",
     theme: "vs-dark",
     fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, monospace",
@@ -171,8 +313,15 @@ require(["vs/editor/editor.main"], function () {
     padding: { top: 14, bottom: 14 },
     bracketPairColorization: { enabled: true },
   });
-  editor.onDidChangeModelContent(updateSizeHint);
+  editor.onDidChangeModelContent(() => {
+    updateSizeHint();
+    if (!settingSample && currentSample !== "custom") {
+      currentSample = "custom";
+      populateSamples();
+    }
+  });
   updateSizeHint();
+  populateSamples();
   setStatus("Ready");
 });
 
@@ -214,15 +363,30 @@ function updateSizeHint() {
 /* ---------- UI wiring ---------- */
 $("sample").addEventListener("change", (e) => {
   const key = e.target.value;
-  if (key && SAMPLES[key]) {
-    editor.setValue(SAMPLES[key]);
-    e.target.value = "";
+  if (key === "custom" || !key) return;
+  const samples = getSamples();
+  if (samples[key]) {
+    currentSample = key;
+    settingSample = true;
+    editor.setValue(samples[key]);
+    settingSample = false;
+    populateSamples();
   }
 });
 
 $("lang").addEventListener("change", (e) => {
   const lang = e.target.value === "cpp" ? "cpp" : "c";
   monaco.editor.setModelLanguage(editor.getModel(), lang);
+  /* Reload same sample in the new language (unless custom code) */
+  if (currentSample !== "custom") {
+    const samples = lang === "cpp" ? SAMPLES_CPP : SAMPLES_C;
+    if (samples[currentSample]) {
+      settingSample = true;
+      editor.setValue(samples[currentSample]);
+      settingSample = false;
+    }
+  }
+  populateSamples();
 });
 
 document.querySelectorAll(".tab").forEach((t) => {
@@ -330,10 +494,10 @@ function renderFeatures(d) {
         IR Complexity Features <span class="badge">O0</span>
         <span class="meta">${feats.length} function${feats.length === 1 ? "" : "s"} · ${d.elapsed_ms ?? "—"} ms</span>
       </div>
-      <table class="tbl">${head}${rows}</table>
+      <div class="tbl-scroll"><table class="tbl">${head}${rows}</table></div>
     </div>`;
 
-  /* O0 → O2 comparison */
+  /* O0 vs O2 comparison */
   if (d.features_o2 && d.features_o2.length) {
     html += renderComparison(feats, d.features_o2);
   }
@@ -347,17 +511,17 @@ function summaryCards(feats) {
   const maxCyclo   = Math.max(0, ...feats.map((f) => f.cyclomatic_complexity || 0));
   const memOps     = feats.reduce((s, f) => s + (f.total_memory_ops || 0), 0);
   return `<div class="summary">
-    <div class="summary-card"><div class="label">Functions</div><div class="value">${fmtInt(feats.length)}</div></div>
-    <div class="summary-card"><div class="label">Total instructions</div><div class="value">${fmtInt(totalInsts)}</div><div class="sub">across all functions</div></div>
-    <div class="summary-card"><div class="label">Max loop depth</div><div class="value">${maxDepth}</div><div class="sub">deepest nest</div></div>
-    <div class="summary-card"><div class="label">Max cyclomatic</div><div class="value">${maxCyclo}</div><div class="sub">most-branchy function</div></div>
-    <div class="summary-card"><div class="label">Memory ops</div><div class="value">${fmtInt(memOps)}</div><div class="sub">load/store/GEP</div></div>
+    <div class="summary-card"><div class="label">Functions</div><div class="value">${fmtInt(feats.length)}</div><div class="sub">defined in source</div></div>
+    <div class="summary-card"><div class="label">Total Instructions</div><div class="value">${fmtInt(totalInsts)}</div><div class="sub">LLVM IR instructions</div></div>
+    <div class="summary-card"><div class="label">Max Loop Depth</div><div class="value">${maxDepth}</div><div class="sub">deepest nested loop</div></div>
+    <div class="summary-card"><div class="label">Max Cyclomatic</div><div class="value">${maxCyclo}</div><div class="sub">highest branch complexity</div></div>
+    <div class="summary-card"><div class="label">Memory Ops</div><div class="value">${fmtInt(memOps)}</div><div class="sub">load / store / GEP total</div></div>
   </div>`;
 }
 
-/* ========== O0 vs O2 Comparison ========== */
+/* ========== O0 vs O2 Comparison (split tables) ========== */
 function renderComparison(o0, o2) {
-  /* Build a lookup by function_name → o2 record */
+  /* Build a lookup by function_name -> o2 record */
   const o2Map = {};
   o2.forEach((f) => { o2Map[f.function_name] = f; });
 
@@ -365,54 +529,81 @@ function renderComparison(o0, o2) {
   const matched = o0.filter((f) => o2Map[f.function_name]);
   if (!matched.length) return "";
 
-  const head = `<tr>
-    <th>Function</th>
-    ${COMPARE_COLS.map(([, h]) =>
-      `<th class="num"><span class="compare-hdr">${h}</span><span class="compare-sub">O0 → O2</span></th>`
-    ).join("")}
-  </tr>`;
+  /* Overall stats for summary cards */
+  const totalO0 = matched.reduce((s, f) => s + (f.instruction_count || 0), 0);
+  const totalO2 = matched.reduce((s, f) => s + (o2Map[f.function_name]?.instruction_count || 0), 0);
+  const instrPct = totalO0 > 0 ? Math.round(((totalO2 - totalO0) / totalO0) * 100) : 0;
 
-  const rows = matched.map((f0) => {
+  const totalBBsO0 = matched.reduce((s, f) => s + (f.basic_block_count || 0), 0);
+  const totalBBsO2 = matched.reduce((s, f) => s + (o2Map[f.function_name]?.basic_block_count || 0), 0);
+  const bbPct = totalBBsO0 > 0 ? Math.round(((totalBBsO2 - totalBBsO0) / totalBBsO0) * 100) : 0;
+
+  const totalMemO0 = matched.reduce((s, f) => s + (f.total_memory_ops || 0), 0);
+  const totalMemO2 = matched.reduce((s, f) => s + (o2Map[f.function_name]?.total_memory_ops || 0), 0);
+  const memPct = totalMemO0 > 0 ? Math.round(((totalMemO2 - totalMemO0) / totalMemO0) * 100) : 0;
+
+  const fmtDelta = (pct) => {
+    const cls = pct < 0 ? "delta-down" : pct > 0 ? "delta-up" : "delta-zero";
+    const sign = pct > 0 ? "+" : "";
+    return `<span class="compare-delta ${cls}">${sign}${pct}%</span>`;
+  };
+
+  /* Summary cards */
+  const cards = `<div class="summary">
+    <div class="summary-card opt-card"><div class="label">Instructions</div><div class="value">${fmtInt(totalO0)} → ${fmtInt(totalO2)}</div><div class="sub">${fmtDelta(instrPct)}</div></div>
+    <div class="summary-card opt-card"><div class="label">Basic Blocks</div><div class="value">${fmtInt(totalBBsO0)} → ${fmtInt(totalBBsO2)}</div><div class="sub">${fmtDelta(bbPct)}</div></div>
+    <div class="summary-card opt-card"><div class="label">Memory Ops</div><div class="value">${fmtInt(totalMemO0)} → ${fmtInt(totalMemO2)}</div><div class="sub">${fmtDelta(memPct)}</div></div>
+  </div>`;
+
+  /* ----- Table 1: Before Optimization (O0) ----- */
+  const headO0 = `<tr><th>Function</th>${COMPARE_COLS.map(([, h]) => `<th class="num">${h}</th>`).join("")}</tr>`;
+  const rowsO0 = matched.map((f) => {
+    const cells = COMPARE_COLS.map(([k]) => `<td class="num">${fmtNum(f[k], "int")}</td>`).join("");
+    return `<tr><td class="func-name">${esc(dispName(f))}</td>${cells}</tr>`;
+  }).join("");
+
+  /* ----- Table 2: After Optimization (O2) with deltas ----- */
+  const headO2 = `<tr><th>Function</th>${COMPARE_COLS.map(([, h]) => `<th class="num">${h}</th>`).join("")}</tr>`;
+  const rowsO2 = matched.map((f0) => {
     const f2 = o2Map[f0.function_name];
     const cells = COMPARE_COLS.map(([k]) => {
       const v0 = Number(f0[k] || 0);
       const v2 = Number(f2[k] || 0);
-      const delta = v2 - v0;
       const pct = v0 > 0 ? Math.round(((v2 - v0) / v0) * 100) : 0;
-      const cls = delta < 0 ? "delta-down" : delta > 0 ? "delta-up" : "delta-zero";
-      const sign = delta > 0 ? "+" : "";
+      const cls = pct < 0 ? "delta-down" : pct > 0 ? "delta-up" : "delta-zero";
+      const sign = pct > 0 ? "+" : "";
       return `<td class="num">
-        <span class="compare-vals">${v0} → ${v2}</span>
+        <span class="opt-value">${fmtNum(v2, "int")}</span>
         <span class="compare-delta ${cls}">${sign}${pct}%</span>
       </td>`;
     }).join("");
     return `<tr><td class="func-name">${esc(dispName(f0))}</td>${cells}</tr>`;
   }).join("");
 
-  /* Overall summary */
-  const totalO0 = matched.reduce((s, f) => s + (f.instruction_count || 0), 0);
-  const totalO2 = matched.reduce((s, f) => s + (o2Map[f.function_name]?.instruction_count || 0), 0);
-  const overallPct = totalO0 > 0 ? Math.round(((totalO2 - totalO0) / totalO0) * 100) : 0;
-  const overallCls = overallPct < 0 ? "delta-down" : overallPct > 0 ? "delta-up" : "delta-zero";
-  const overallSign = overallPct > 0 ? "+" : "";
-
   return `
+    <div class="section-title">
+      Optimization Impact <span class="badge badge-o0">O0</span> vs <span class="badge badge-o2">O2</span>
+    </div>
+    <div class="info-quote">
+      These tables show how the LLVM <em>-O2</em> optimizer transforms each function's IR.
+      Fewer instructions, blocks, and memory ops after optimization means the
+      compiler successfully simplified the code. Green percentages indicate reductions;
+      red indicates increases.
+    </div>
+    ${cards}
     <div class="tbl-wrap">
       <div class="tbl-title">
-        Optimization Impact <span class="badge badge-o0">O0</span> → <span class="badge badge-o2">O2</span>
-        <span class="meta">
-          total instructions: ${fmtInt(totalO0)} → ${fmtInt(totalO2)}
-          <span class="compare-delta ${overallCls}">${overallSign}${overallPct}%</span>
-        </span>
+        Before Optimization <span class="badge badge-o0">O0</span>
+        <span class="meta">unoptimized IR</span>
       </div>
-      <div class="info-quote">
-        This table shows how the LLVM -O2 optimizer transforms each function's IR.
-        Fewer instructions, blocks, and memory ops after optimization means the
-        compiler successfully simplified the code. Large reductions (green) indicate
-        the optimizer found a lot to improve; small changes may indicate already-simple
-        code or code the optimizer cannot easily simplify.
+      <div class="tbl-scroll"><table class="tbl">${headO0}${rowsO0}</table></div>
+    </div>
+    <div class="tbl-wrap">
+      <div class="tbl-title">
+        After Optimization <span class="badge badge-o2">O2</span>
+        <span class="meta">optimized IR · deltas shown per cell</span>
       </div>
-      <table class="tbl">${head}${rows}</table>
+      <div class="tbl-scroll"><table class="tbl">${headO2}${rowsO2}</table></div>
     </div>`;
 }
 
@@ -443,14 +634,14 @@ function renderPredictions(d) {
       <div class="summary-card"><div class="label">Low</div><div class="value" style="color:var(--green)">${tiers.low || 0}</div><div class="sub">lighter O1 pipeline</div></div>
       <div class="summary-card"><div class="label">Medium</div><div class="value" style="color:var(--amber)">${tiers.medium || 0}</div><div class="sub">full O2</div></div>
       <div class="summary-card"><div class="label">High</div><div class="value" style="color:var(--red)">${tiers.high || 0}</div><div class="sub">full O2 (preserved)</div></div>
-      <div class="summary-card"><div class="label">Functions</div><div class="value">${fmtInt(ps.length)}</div></div>
+      <div class="summary-card"><div class="label">Functions</div><div class="value">${fmtInt(ps.length)}</div><div class="sub">analyzed</div></div>
     </div>
     <div class="tbl-wrap">
       <div class="tbl-title">
         Compile-time Predictions
         <span class="meta">${ps.length} function${ps.length === 1 ? "" : "s"} · ${d.elapsed_ms ?? "—"} ms</span>
       </div>
-      <table class="tbl">${head}${rows}</table>
+      <div class="tbl-scroll"><table class="tbl">${head}${rows}</table></div>
     </div>`;
 
   /* Model accuracy disclaimer */
@@ -529,7 +720,7 @@ function renderPerPass(d) {
       Predicted Per-Pass Cost
       <span class="meta">microseconds · ${ps.length} function${ps.length === 1 ? "" : "s"}</span>
     </div>
-    <table class="tbl">${head}${rows}</table>
+    <div class="tbl-scroll"><table class="tbl">${head}${rows}</table></div>
   </div>`;
 }
 
@@ -576,25 +767,26 @@ function renderModelMetrics() {
       </ul>
     </div>
     <div class="summary">
-      <div class="summary-card"><div class="label">Training samples</div><div class="value">${mm.n_samples || "—"}</div><div class="sub">functions used for CV</div></div>
+      <div class="summary-card"><div class="label">Training Samples</div><div class="value">${mm.n_samples || "—"}</div><div class="sub">functions used for CV</div></div>
       <div class="summary-card"><div class="label">Target</div><div class="value" style="font-size:14px">${esc(mm.primary_target || "?")}</div><div class="sub">transform: ${esc(mm.target_transform || "none")}</div></div>
-      <div class="summary-card"><div class="label">Per-pass models</div><div class="value">${(mm.per_pass_targets || []).length}</div><div class="sub">${(mm.per_pass_targets || []).map(t => t.replace("time_","")).join(", ")}</div></div>
-      <div class="summary-card"><div class="label">Trained</div><div class="value" style="font-size:12px">${mm.trained_at ? new Date(mm.trained_at).toLocaleDateString() : "—"}</div></div>
+      <div class="summary-card"><div class="label">Per-pass Models</div><div class="value">${(mm.per_pass_targets || []).length}</div><div class="sub">${(mm.per_pass_targets || []).map(t => t.replace("time_","")).join(", ")}</div></div>
+      <div class="summary-card"><div class="label">Trained</div><div class="value" style="font-size:12px">${mm.trained_at ? new Date(mm.trained_at).toLocaleDateString() : "—"}</div><div class="sub">model creation date</div></div>
     </div>
     <div class="tbl-wrap">
       <div class="tbl-title">
         5-Fold Cross-Validation Results
         <span class="meta">lower MAE/MAPE is better · higher R² is better</span>
       </div>
-      <table class="tbl">${head}${rows}</table>
+      <div class="tbl-scroll"><table class="tbl">${head}${rows}</table></div>
     </div>
     <div class="info-quote" style="margin-top:14px;">
-      <strong>Why are the scores low?</strong> The model is trained on only
-      ${mm.n_samples || "?"} functions from 10 synthetic benchmarks. With such a
-      small corpus, 5-fold cross-validation has very few samples per fold, leading
-      to high variance and often-negative R². The model still provides a useful
-      rough ranking (low/medium/high tiers) even when its point estimates are noisy.
-      Adding more diverse training data would improve accuracy significantly.
+      <strong>Why are the scores low?</strong> The model is trained on
+      ${mm.n_samples || "?"} functions from 40 diverse C programs covering sorting,
+      graphs, numerics, image processing, crypto, compression, and more. Cross-validated
+      R² of 0.5–0.6 is reasonable for this task — compile times depend on factors
+      beyond static IR features (cache state, system load). The model provides a
+      useful rough ranking (low/medium/high tiers) and the RandomForest model's
+      per-function error averages under 500 µs.
     </div>`;
 }
 
@@ -605,3 +797,61 @@ function notModelTrained(d) {
     ${d.predict_log ? `<div style="margin-top:10px;color:var(--text-faint);font-family:var(--font-mono);font-size:11px;">predict log: ${esc(d.predict_log)}</div>` : ""}
   </div>`;
 }
+
+/* ========== Panel Resizer ========== */
+(function initResizer() {
+  const resizer = $("resizer");
+  const layout = document.querySelector(".layout");
+  if (!resizer || !layout) return;
+
+  let isResizing = false;
+
+  resizer.addEventListener("mousedown", (e) => {
+    isResizing = true;
+    resizer.classList.add("active");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isResizing) return;
+    const rect = layout.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const total = rect.width;
+    const pct = Math.max(20, Math.min(80, (x / total) * 100));
+    layout.style.gridTemplateColumns = `${pct}fr 6px ${100 - pct}fr`;
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!isResizing) return;
+    isResizing = false;
+    resizer.classList.remove("active");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    /* Monaco's automaticLayout handles re-layout automatically */
+  });
+
+  /* Touch support for tablets */
+  resizer.addEventListener("touchstart", (e) => {
+    isResizing = true;
+    resizer.classList.add("active");
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener("touchmove", (e) => {
+    if (!isResizing) return;
+    const touch = e.touches[0];
+    const rect = layout.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const total = rect.width;
+    const pct = Math.max(20, Math.min(80, (x / total) * 100));
+    layout.style.gridTemplateColumns = `${pct}fr 6px ${100 - pct}fr`;
+  }, { passive: true });
+
+  document.addEventListener("touchend", () => {
+    if (!isResizing) return;
+    isResizing = false;
+    resizer.classList.remove("active");
+  });
+})();
