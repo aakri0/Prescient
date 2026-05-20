@@ -129,11 +129,22 @@ def main() -> int:
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", 8080))
     debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
-    print(f"[prescient-web] serving on http://{host}:{port}  "
-          f"(plugin={'OK' if PLUGIN.is_file() else 'MISSING'}, "
-          f"models={'OK' if (MODELS/'training_metadata.json').is_file() else 'MISSING'})",
+
+    plugin_ok = PLUGIN.is_file()
+    models_ok = (MODELS / "training_metadata.json").is_file()
+    print(f"\n  Prescient web UI running at: http://localhost:{port}\n"
+          f"  plugin={'OK' if plugin_ok else 'MISSING'}  "
+          f"models={'OK' if models_ok else 'MISSING'}\n"
+          f"  Press Ctrl+C to stop.\n",
           flush=True)
-    app.run(host=host, port=port, debug=debug)
+
+    # Suppress Werkzeug's multi-URL listing ("Running on 0.0.0.0 / 127.0.0.1
+    # / 172.x.y.z") — that confused users into thinking three sites were running.
+    # Our custom message above is the single clean output.
+    import logging
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+    app.run(host=host, port=port, debug=debug, use_reloader=False)
     return 0
 
 

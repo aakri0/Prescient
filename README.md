@@ -82,15 +82,32 @@ Pick one of two paths:
 
 ## Getting Started
 
-In every path the order is the same: **build → train → run**. The model
-must be trained once before `demo`, `evaluate`, `predict` or `adaptive`
-will work. With Docker the trained model persists on the host via the
-`./models` volume, so `train` only needs to be run again when the code or
-training data changes.
+The order is always: **build → train → run**. The model must be trained
+once before `demo`, `evaluate`, `predict` or `adaptive` will work.
+The trained model persists on the host in `./models`, so `train` only
+needs to be rerun when the code or training data changes.
 
-### Linux (Ubuntu 22.04)
+### Docker (any OS — recommended)
 
-**Native:**
+Two convenience scripts wrap every `docker compose` command so you
+never have to remember the raw Docker incantation:
+
+```bash
+git clone https://github.com/aakri0/Prescient.git && cd Prescient
+./start.sh train              # first run auto-builds the image (~5 min)
+./start.sh demo               # narrated five-act demo
+./start.sh evaluate           # full evaluation suite
+./start.sh                    # web UI at http://localhost:8080
+./stop.sh                     # stop the web UI
+```
+
+Every `./start.sh <mode>` is a single command — it builds the image if
+needed, then runs the requested pipeline step in a temporary container.
+Run `./start.sh help` for the full list of modes.
+
+### Native Linux (Ubuntu 22.04)
+
+If you'd rather skip Docker entirely:
 
 ```bash
 git clone https://github.com/aakri0/Prescient.git && cd Prescient
@@ -98,46 +115,11 @@ git clone https://github.com/aakri0/Prescient.git && cd Prescient
 ./build.sh                    # build build/IRComplexityEstimator.so
 ./run.sh train                # generate the corpus and train the model
 ./run.sh demo                 # narrated five-act demo
-./run.sh evaluate             # full evaluation suite -> docs/evaluation_results.json
+./run.sh evaluate             # full evaluation suite
 ```
 
-**Docker:**
-
-```bash
-git clone https://github.com/aakri0/Prescient.git && cd Prescient
-docker compose build                        # build the image (installs LLVM 17)
-docker compose run --rm prescient train     # generate the corpus and train the model
-docker compose run --rm prescient demo      # narrated five-act demo
-docker compose run --rm prescient evaluate  # full evaluation suite
-```
-
-### macOS
-
-The native toolchain is not supported on macOS (no `apt`). Use Docker:
-
-```bash
-git clone https://github.com/aakri0/Prescient.git && cd Prescient
-docker compose build                        # build the image (installs LLVM 17)
-docker compose run --rm prescient train     # generate the corpus and train the model
-docker compose run --rm prescient demo      # narrated five-act demo
-docker compose run --rm prescient evaluate  # full evaluation suite
-```
-
-### Windows
-
-Use Docker Desktop (WSL 2 backend recommended). Run in PowerShell:
-
-```powershell
-git clone https://github.com/aakri0/Prescient.git
-cd Prescient
-docker compose build                        # build the image (installs LLVM 17)
-docker compose run --rm prescient train     # generate the corpus and train the model
-docker compose run --rm prescient demo      # narrated five-act demo
-docker compose run --rm prescient evaluate  # full evaluation suite
-```
-
-> The first `docker compose build` takes a few minutes — it installs the
-> LLVM 17 toolchain into the image. Subsequent runs are cached.
+> `setup_env.sh` uses `apt`, so the native path is Ubuntu-only.
+> macOS and Windows users should use the Docker path above.
 
 ## Web Frontend
 
@@ -147,10 +129,11 @@ with tabs for the IR feature table, compile-time predictions and
 predicted per-pass cost.
 
 ```bash
-docker compose up frontend            # open http://localhost:8080
+./start.sh                            # open http://localhost:8080
+./stop.sh                             # stop it
 ```
 
-Native (Linux):
+Native (Linux only):
 
 ```bash
 pip install -r requirements.txt
@@ -159,7 +142,7 @@ python3 frontend/server.py            # open http://localhost:8080
 
 Six built-in samples are available from the dropdown (simple add,
 branchy classify, triple-nested loops, memory-heavy blur, nested
-structs, and the documented failure case). `⌘/Ctrl + Enter` runs the
+structs, and the documented failure case). `Ctrl + Enter` runs the
 analysis. See [frontend/](frontend/) for the code.
 
 ## Usage
@@ -250,19 +233,20 @@ testcases are only examples. A ready-made sample, `testcases/sample_math.c`
 included to try the modes on:
 
 ```bash
-./run.sh extract testcases/sample_math.c
-docker compose run --rm prescient extract testcases/sample_math.c
+./start.sh extract testcases/sample_math.c
+./start.sh predict testcases/sample_math.c
 ```
 
 Check complexity of your own program:
 
 ```bash
-# native (Linux)
-./run.sh extract path/to/your_program.c
-
-# Docker — put the file somewhere mounted, e.g. testcases/, then:
-docker compose run --rm prescient extract testcases/your_program.c
+./start.sh extract path/to/your_program.c
+./start.sh predict path/to/your_program.c
 ```
+
+`start.sh` automatically bind-mounts the file's directory into the
+container, so any path on your machine works — the file doesn't have to
+live under `testcases/`.
 
 This compiles your file to LLVM IR and writes `output/features.json` — one
 record per function with the 23 complexity metrics (instruction count,
@@ -295,8 +279,10 @@ Caveats worth knowing:
 
 ```
 .
-├── build.sh                       # configure + build the LLVM plugin
-├── run.sh                         # extract / train / predict / evaluate / adaptive / demo entry point
+├── start.sh                       # single entry point (Docker) — ./start.sh help
+├── stop.sh                        # stop the web UI
+├── build.sh                       # configure + build the LLVM plugin (native Linux)
+├── run.sh                         # extract / train / predict / evaluate / adaptive / demo (native Linux)
 ├── CMakeLists.txt                 # LLVM-17 plugin build configuration
 ├── Dockerfile, docker-compose.yml # reproducible build environment
 ├── requirements.txt               # Python dependencies (scikit-learn, pandas, …)
