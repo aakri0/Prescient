@@ -290,15 +290,34 @@ function populateSamples() {
   sel.value = currentSample;
 }
 
+/* ---------- theme toggle ---------- */
+function getTheme() {
+  return localStorage.getItem("prescient-theme") || "dark";
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const btn = $("theme-toggle");
+  if (btn) btn.textContent = theme === "light" ? "☾" : "☀"; /* ☾ / ☀ */
+  if (typeof monaco !== "undefined") {
+    monaco.editor.setTheme(theme === "light" ? "vs" : "vs-dark");
+  }
+  localStorage.setItem("prescient-theme", theme);
+}
+applyTheme(getTheme());
+$("theme-toggle").addEventListener("click", () => {
+  applyTheme(getTheme() === "dark" ? "light" : "dark");
+});
+
 /* ---------- Monaco bootstrap ---------- */
 require.config({
   paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" },
 });
 require(["vs/editor/editor.main"], function () {
+  const monacoTheme = getTheme() === "light" ? "vs" : "vs-dark";
   editor = monaco.editor.create($("editor"), {
     value: SAMPLES_C.simple,
     language: "c",
-    theme: "vs-dark",
+    theme: monacoTheme,
     fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, monospace",
     fontSize: 14,
     fontLigatures: true,

@@ -17,6 +17,24 @@
   --font-mono:    'JetBrains Mono', 'SF Mono', Menlo, monospace;
 }
 
+/* ===== light theme overrides ===== */
+:root[data-theme="light"] {
+  --bg:           #f5f7fa;
+  --bg-elev:      #ffffff;
+  --bg-elev-2:    #edf0f5;
+  --border:       #d4d9e2;
+  --border-soft:  #e1e5ec;
+  --text:         #1a1f2b;
+  --text-dim:     #5c6370;
+  --text-faint:   #8993a4;
+  --accent:       #0284c7;
+  --accent-2:     #6366f1;
+  --accent-glow:  rgba(2, 132, 199, 0.12);
+  --green:        #16a34a;
+  --amber:        #d97706;
+  --red:          #dc2626;
+}
+
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
@@ -81,6 +99,28 @@ kbd {
 }
 
 .topbar-right { display: flex; align-items: center; gap: 12px; }
+
+/* theme toggle */
+.theme-toggle {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  transition: border-color .15s, background .15s, color .15s;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 .health {
   font-size: 11px;
@@ -236,6 +276,26 @@ kbd {
 /* ===== editor ===== */
 .editor { flex: 1; min-height: 0; }
 .monaco-editor, .monaco-editor-background { background: var(--bg) !important; }
+
+/* light-mode: softer logo glow and btn-primary text */
+:root[data-theme="light"] .logo {
+  color: #fff;
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,.06),
+    0 4px 12px -4px rgba(2,132,199,.35);
+}
+:root[data-theme="light"] .btn-primary {
+  color: #fff;
+}
+:root[data-theme="light"] .btn-primary:hover {
+  box-shadow: 0 0 0 3px var(--accent-glow), 0 4px 16px -4px rgba(2,132,199,.4);
+}
+:root[data-theme="light"] .error-box {
+  color: #991b1b;
+}
+:root[data-theme="light"] table.tbl tr:hover td {
+  background: rgba(2,132,199,.04);
+}
 
 /* ===== tabs ===== */
 .tabs { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border-soft); flex-shrink: 0; overflow-x: auto; }
